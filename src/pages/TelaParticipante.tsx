@@ -74,31 +74,35 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
     }
   }, [initialSessionId]);
 
-  // Main active question loader
+  // Main active question loader & subscription
   useEffect(() => {
-    if (!session) return;
+    const activeSessionId = session?.id || initialSessionId;
+    if (!activeSessionId) return;
 
-    loadActiveQuestionState();
-
-    // Subscribe to changes in host (moving question slide or showing results)
-    const unsubscribe = subscribeToSyncChanges((evt) => {
-      // Reload session object
-      const refreshedS = syncStore.getSession(session.id);
-      if (refreshedS) {
-        setSession(refreshedS);
+    const fetchSession = () => {
+      const activeS = syncStore.getSession(activeSessionId);
+      if (activeS) {
+        setSession(activeS);
       }
+    };
+
+    fetchSession();
+
+    // Subscribe to changes in host (moving question slide, projected states, or showing results)
+    const unsubscribe = subscribeToSyncChanges((evt) => {
+      fetchSession();
     });
 
     return () => {
       unsubscribe();
     };
-  }, [session?.id]);
+  }, [session?.id, initialSessionId]);
 
-  // Handle question layout swap
+  // Handle question layout swap or projected change
   useEffect(() => {
     if (!session) return;
     loadActiveQuestionState();
-  }, [session?.currentQuestionIndex]);
+  }, [session?.currentQuestionIndex, session?.projectedQuestionId, session?.id]);
 
   const loadActiveQuestionState = () => {
     if (!session) return;
@@ -217,6 +221,19 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
     setHasVotedCurrent(false);
   };
 
+  const isQuestionProjected = (() => {
+    if (!session || !activeQuestion) return false;
+    
+    // Check if the session has slide mappings. If so, they are running in PPT mode.
+    const hasMappings = session.slideMappings && session.slideMappings.length > 0;
+    if (!hasMappings) {
+      return true; // No mappings yet, default to projected so it doesn't block demoing without mappings
+    }
+    
+    // In PPT mode, must be explicitly matching the projected question ID
+    return session.projectedQuestionId === activeQuestion.id;
+  })();
+
   return (
     <div className="bg-[#09090b] text-zinc-100 min-h-screen py-4 px-4 flex flex-col justify-between items-center w-full select-none max-w-md mx-auto relative overflow-hidden font-sans">
       
@@ -328,15 +345,25 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
             </div>
           </div>
 
-          {!activeQuestion ? (
-            /* HOLDING SCREEN (NO QUESTION ENABLED YET FROM INSTRUTOR) */
-            <div className="my-auto text-center space-y-4 py-16 flex flex-col items-center">
-              <Loader2 className="w-10 h-10 text-[#a3e635] animate-spin shrink-0" />
-              <div>
-                <h3 className="font-bold text-zinc-300">Aguardando Enquete</h3>
-                <p className="text-xs text-zinc-550 max-w-xs mt-1 leading-relaxed font-mono">
-                  O instrutor está preparando os slides do PowerPoint. Esta tela atualizará automaticamente quando a votação abrir!
+          {!activeQuestion || !isQuestionProjected ? (
+            /* HOLDING SCREEN (STAND-BY / NO QUESTION PROJECTED YET) */
+            <div className="my-auto text-center space-y-5 py-12 flex flex-col items-center z-10 p-4">
+              <div className="relative">
+                <div className="w-16 h-16 bg-[#a3e635]/10 border border-[#a3e635]/20 rounded-full flex items-center justify-center animate-[pulse_2s_infinite]">
+                  <Moon className="w-7 h-7 text-[#a3e635]" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 bg-zinc-950 p-1 rounded-full border border-zinc-800">
+                  <Loader2 className="w-4 h-4 text-zinc-500 animate-spin" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <h3 className="font-extrabold text-white text-base tracking-tight font-display">Conectado na Sessão • Em Stand-by</h3>
+                <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
+                  Aguardando o palestrante projetar o slide desta pergunta no PowerPoint.
                 </p>
+                <div className="mt-4 p-2.5 bg-[#121214] border border-zinc-800 rounded-xl text-[11px] text-zinc-500 font-mono inline-block">
+                  A página atualizará automaticamente em tempo real!
+                </div>
               </div>
             </div>
           ) : (

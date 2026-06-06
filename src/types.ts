@@ -32,6 +32,8 @@ export interface Session {
   showLeaderboard: boolean; // whether to show ranking on screen
   status: 'active' | 'ended';
   slideMappings?: SlideMapping[];
+  currentSlideId?: string | null;
+  projectedQuestionId?: string | null;
 }
 
 export interface Vote {

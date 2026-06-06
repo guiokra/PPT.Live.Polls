@@ -338,6 +338,15 @@ export const syncStore = {
     this.saveSession(session);
   },
 
+  setCurrentSlideAndProjected(sessionId: string, slideId: string | null, questionId: string | null): void {
+    const session = this.getSession(sessionId);
+    if (session) {
+      session.currentSlideId = slideId;
+      session.projectedQuestionId = questionId;
+      this.saveSession(session);
+    }
+  },
+
   deleteQuestionFromSession(sessionId: string, questionId: string): void {
     const session = this.getSession(sessionId);
     if (!session) return;

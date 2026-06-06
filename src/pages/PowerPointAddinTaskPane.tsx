@@ -91,19 +91,28 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
         (result: any) => {
           if (result && result.status === asyncResultStatus.Succeeded && result.value && result.value.slides && result.value.slides.length > 0) {
             const slideId = result.value.slides[0].id;
-            const mappings = activeSession.slideMappings || [];
+            const currentSession = syncStore.getSession(activeSession.id);
+            if (!currentSession) return;
+            const mappings = currentSession.slideMappings || [];
             const found = mappings.find(m => m.slideId === slideId);
             if (found) {
-              const questionIdx = activeSession.questions.findIndex(q => q.id === found.questionId);
+              const questionIdx = currentSession.questions.findIndex(q => q.id === found.questionId);
               if (questionIdx >= 0) {
-                syncStore.setQuestionIndex(activeSession.id, questionIdx);
+                syncStore.setQuestionIndex(currentSession.id, questionIdx);
                 if (found.slideType === 'responses') {
-                  syncStore.toggleResults(activeSession.id, true);
+                  syncStore.toggleResults(currentSession.id, true);
                 } else {
-                  syncStore.toggleResults(activeSession.id, false);
+                  syncStore.toggleResults(currentSession.id, false);
                 }
+                syncStore.setCurrentSlideAndProjected(currentSession.id, slideId, found.questionId);
+                onRefresh();
+              } else {
+                syncStore.setCurrentSlideAndProjected(currentSession.id, slideId, null);
                 onRefresh();
               }
+            } else {
+              syncStore.setCurrentSlideAndProjected(currentSession.id, slideId, null);
+              onRefresh();
             }
           }
         }
