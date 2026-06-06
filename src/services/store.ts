@@ -269,15 +269,17 @@ export const syncStore = {
   },
 
   // QUESTIONS IN SESSION
-  addQuestionToSession(sessionId: string, text: string, options: string[], correctOptionIndex: number | null): Question {
+  addQuestionToSession(sessionId: string, text: string, options: string[], correctOptionIndex: number | null, type?: 'alternativa' | 'aberta', resultsView?: 'live' | 'results-slide-only'): Question {
     const session = this.getSession(sessionId);
     if (!session) throw new Error('Session not found');
 
     const newQuestion: Question = {
       id: `q-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       text,
-      options: options.filter(opt => opt.trim() !== ''),
-      correctOptionIndex
+      options: type === 'aberta' ? [] : options.filter(opt => opt.trim() !== ''),
+      correctOptionIndex: type === 'aberta' ? null : correctOptionIndex,
+      type: type || 'alternativa',
+      resultsView: resultsView || 'results-slide-only'
     };
 
     session.questions.push(newQuestion);
@@ -285,7 +287,7 @@ export const syncStore = {
     return newQuestion;
   },
 
-  updateQuestionInSession(sessionId: string, questionId: string, text: string, options: string[], correctOptionIndex: number | null): void {
+  updateQuestionInSession(sessionId: string, questionId: string, text: string, options: string[], correctOptionIndex: number | null, type?: 'alternativa' | 'aberta', resultsView?: 'live' | 'results-slide-only'): void {
     const session = this.getSession(sessionId);
     if (!session) return;
 
@@ -294,11 +296,32 @@ export const syncStore = {
       session.questions[idx] = {
         ...session.questions[idx],
         text,
-        options: options.filter(opt => opt.trim() !== ''),
-        correctOptionIndex
+        options: type === 'aberta' ? [] : options.filter(opt => opt.trim() !== ''),
+        correctOptionIndex: type === 'aberta' ? null : correctOptionIndex,
+        type: type || 'alternativa',
+        resultsView: resultsView || 'results-slide-only'
       };
       this.saveSession(session);
     }
+  },
+
+  saveSlideMapping(sessionId: string, slideId: string, questionId: string, slideType: 'question' | 'responses'): void {
+    const session = this.getSession(sessionId);
+    if (!session) return;
+    if (!session.slideMappings) session.slideMappings = [];
+
+    // Remove old conflicting mappings for this slide or this specific question configuration
+    session.slideMappings = session.slideMappings.filter(
+      m => !(m.slideId === slideId || (m.questionId === questionId && m.slideType === slideType))
+    );
+
+    session.slideMappings.push({
+      slideId,
+      questionId,
+      slideType
+    });
+
+    this.saveSession(session);
   },
 
   deleteQuestionFromSession(sessionId: string, questionId: string): void {
@@ -336,7 +359,7 @@ export const syncStore = {
     return this.getAllVotesRaw().filter(v => v.sessionId === sessionId && v.questionId === questionId);
   },
 
-  castVote(sessionId: string, questionId: string, participantId: string, participantName: string, selectedOptionIndex: number): boolean {
+  castVote(sessionId: string, questionId: string, participantId: string, participantName: string, selectedOptionIndex: number, textResponse?: string): boolean {
     const votes = this.getAllVotesRaw();
     
     // Check if participant has already voted on this specific question
@@ -348,10 +371,8 @@ export const syncStore = {
     const session = this.getSession(sessionId);
     if (!session) return false;
     
-    const activeQuestion = session.questions[session.currentQuestionIndex];
-    if (!activeQuestion || activeQuestion.id !== questionId) {
-      // Trying to vote on an inactive question
-    }
+    const activeQuestion = session.questions.find(q => q.id === questionId) || session.questions[session.currentQuestionIndex];
+    if (!activeQuestion) return false;
 
     const newVote: Vote = {
       id: `vt-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -360,6 +381,7 @@ export const syncStore = {
       participantId,
       participantName: session.isAnonymous ? 'Anônimo' : (participantName || 'Anônimo'),
       selectedOptionIndex,
+      textResponse,
       timestamp: new Date().toISOString()
     };
 

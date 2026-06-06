@@ -3,11 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface SlideMapping {
+  slideId: string;
+  slideIndex?: number;
+  questionId: string;
+  slideType: 'question' | 'responses';
+}
+
 export interface Question {
   id: string;
   text: string;
   options: string[]; // e.g. ["Option A", "Option B", ...]
   correctOptionIndex: number | null; // index of correct answer, or null if it's a survey poll
+  type?: 'alternativa' | 'aberta';
+  resultsView?: 'live' | 'results-slide-only';
 }
 
 export interface Session {
@@ -22,6 +31,7 @@ export interface Session {
   isQuizMode: boolean; // enables correct answers tracking and leaderboard
   showLeaderboard: boolean; // whether to show ranking on screen
   status: 'active' | 'ended';
+  slideMappings?: SlideMapping[];
 }
 
 export interface Vote {
@@ -30,7 +40,8 @@ export interface Vote {
   questionId: string;
   participantId: string;
   participantName: string;
-  selectedOptionIndex: number;
+  selectedOptionIndex: number; // for alternative
+  textResponse?: string; // for custom open-ended text answers
   timestamp: string;
 }
 

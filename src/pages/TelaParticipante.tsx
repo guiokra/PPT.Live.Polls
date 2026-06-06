@@ -46,6 +46,7 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
   
   // Voting
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [openText, setOpenText] = useState<string>('');
   const [hasVotedCurrent, setHasVotedCurrent] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -107,9 +108,11 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
       
       if (myVote) {
         setSelectedIdx(myVote.selectedOptionIndex);
+        setOpenText(myVote.textResponse || '');
         setHasVotedCurrent(true);
       } else {
         setSelectedIdx(null);
+        setOpenText('');
         setHasVotedCurrent(false);
       }
     }
@@ -168,7 +171,11 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
   };
 
   const handleCastVoteSubmit = () => {
-    if (!session || !activeQuestion || !me || selectedIdx === null || hasVotedCurrent) return;
+    if (!session || !activeQuestion || !me || hasVotedCurrent) return;
+
+    const isAberta = activeQuestion.type === 'aberta';
+    if (isAberta && openText.trim() === '') return;
+    if (!isAberta && selectedIdx === null) return;
 
     setLoading(true);
     const success = syncStore.castVote(
@@ -176,13 +183,14 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
       activeQuestion.id,
       me.id,
       me.name,
-      selectedIdx
+      isAberta ? -1 : selectedIdx!,
+      isAberta ? openText.trim() : undefined
     );
 
     if (success) {
       setHasVotedCurrent(true);
       // Update local cache XP score
-      if (session.isQuizMode && selectedIdx === activeQuestion.correctOptionIndex) {
+      if (session.isQuizMode && !isAberta && selectedIdx === activeQuestion.correctOptionIndex) {
         const copyMe = { ...me, score: me.score + 100 };
         setMe(copyMe);
         localStorage.setItem(`ppt_myself_${session.id}`, JSON.stringify(copyMe));
@@ -341,13 +349,13 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
                     <Check className="w-6 h-6 shrink-0 animate-bounce font-black" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-[#a3e635] text-sm">Voto Confirmado com Sucesso!</h3>
+                    <h3 className="font-bold text-[#a3e635] text-sm font-display">Voto Confirmado com Sucesso!</h3>
                     <p className="text-[11px] text-zinc-400 leading-relaxed mt-1">
                       Sua escolha foi computada nos gráficos em tempo real da apresentação.
                     </p>
                   </div>
                   
-                  {session.isQuizMode && activeQuestion.correctOptionIndex !== null && (
+                  {session.isQuizMode && activeQuestion.type !== 'aberta' && activeQuestion.correctOptionIndex !== null && (
                     <div className="p-2 w-full bg-[#09090b] rounded-lg text-[10px] font-mono text-zinc-500 mt-1 border border-[#27272a]">
                       {selectedIdx === activeQuestion.correctOptionIndex ? (
                         <span className="text-[#a3e635] font-bold flex items-center justify-center gap-1">
@@ -363,6 +371,33 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     <span>Aguardando Próxima Pergunta...</span>
                   </div>
+                </div>
+              ) : activeQuestion.type === 'aberta' ? (
+                /* OPEN ENDED CONTAINER */
+                <div className="space-y-4">
+                  <span className="text-[10px] text-zinc-400 block font-mono">DIGITE SUA RESPOSTA ABAIXO:</span>
+                  <textarea
+                    rows={4}
+                    value={openText}
+                    onChange={(e) => setOpenText(e.target.value)}
+                    placeholder="Sua resposta..."
+                    className="w-full text-xs font-semibold bg-[#121214] border border-[#27272a] rounded-xl p-3 focus:border-[#a3e635] focus:outline-none focus:ring-1 focus:ring-[#a3e635]/20 text-zinc-100 placeholder-zinc-700"
+                    maxLength={150}
+                  />
+                  <button
+                    onClick={handleCastVoteSubmit}
+                    disabled={openText.trim() === '' || loading}
+                    className="w-full bg-[#a3e635] hover:bg-[#a3e635]/90 text-zinc-950 font-black py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all text-xs cursor-pointer shadow-md uppercase tracking-wider font-mono"
+                  >
+                    {loading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <VoteIcon className="w-4 h-4 text-zinc-950" />
+                        <span>Enviar Resposta</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               ) : (
                 /* FORM INPUT OPTIONS FOR VOTING */

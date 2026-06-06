@@ -232,14 +232,37 @@ export const TelaApresentacao: React.FC<TelaApresentacaoProps> = ({
                   {/* REAL-TIME RESULTS CHART OR HOLDING SCREEN */}
                   <div className="pt-6 w-full max-w-3xl">
                     {session.showResults ? (
-                      <div className="p-4 rounded-2xl bg-[#09090b]/40 border border-[#27272a] animate-in fade-in duration-300">
-                        <ResultChart
-                          options={activeQuestion.options}
-                          votes={votes}
-                          correctOptionIndex={activeQuestion.correctOptionIndex}
-                          revealAnswer={session.revealAnswer}
-                        />
-                      </div>
+                      activeQuestion.type === 'aberta' ? (
+                        <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2">
+                          <span className="text-[10px] text-[#a3e635] font-mono block tracking-wider uppercase">Repostas Enviadas:</span>
+                          {votes.length === 0 ? (
+                            <div className="text-center p-8 text-zinc-550 border border-[#27272a] rounded-2xl bg-[#09090b]/20 font-mono text-xs">
+                              Nenhuma resposta de texto enviada pelos alunos ainda.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {votes.map((v, vidx) => (
+                                <div key={vidx} className="p-3.5 rounded-xl bg-[#121214] border border-[#27272a] animate-in fade-in slide-in-from-bottom-2">
+                                  <div className="flex items-center justify-between text-[10px] font-mono text-zinc-550 mb-1.5">
+                                    <span className="font-bold text-[#a3e635]">{v.participantName}</span>
+                                    <span>{new Date(v.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                  </div>
+                                  <p className="text-xs text-zinc-150 leading-relaxed font-semibold">"{v.textResponse || 'Resposta enviada'}"</p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-2xl bg-[#09090b]/40 border border-[#27272a] animate-in fade-in duration-300">
+                          <ResultChart
+                            options={activeQuestion.options}
+                            votes={votes}
+                            correctOptionIndex={activeQuestion.correctOptionIndex}
+                            revealAnswer={session.revealAnswer}
+                          />
+                        </div>
+                      )
                     ) : (
                       /* BLIND SCREEN (VOTING ACTIVE BUT RESULTS BLOCKED TO REDUCE BIAS) */
                       <div className="p-8 text-center rounded-2xl bg-[#09090b]/60 border border-dashed border-[#27272a] max-w-2xl mx-auto space-y-3 flex flex-col items-center justify-center">
