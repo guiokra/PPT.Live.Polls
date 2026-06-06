@@ -15,7 +15,13 @@ import {
   ChevronRight, 
   Trash2, 
   Edit2, 
-  ArrowLeft
+  ArrowLeft,
+  MoreVertical,
+  Trophy,
+  PlusCircle,
+  HelpCircle,
+  Grid,
+  FileSpreadsheet
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
@@ -40,7 +46,10 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
   const [isOfficeAvailable, setIsOfficeAvailable] = useState<boolean>(false);
   const [insertSuccess, setInsertSuccess] = useState<string | null>(null);
 
-  // Question Form State (inline & streamlined)
+  // Toggle for Question Creation Form View inside active session
+  const [isFormOpen, setIsFormOpen] = useState<boolean>(false);
+
+  // Question Form state
   const [qText, setQText] = useState<string>('');
   const [qType, setQType] = useState<'alternativa' | 'aberta'>('alternativa');
   const [qOptions, setQOptions] = useState<string[]>(['', '', '', '']);
@@ -49,6 +58,9 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
 
   // Session inline creator
   const [newSessionName, setNewSessionName] = useState<string>('');
+
+  // Dropdown menus for questions
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     setSessions(syncStore.getSessions().filter(s => s.status === 'active'));
@@ -64,29 +76,30 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
 
   const triggerNotification = (message: string) => {
     setInsertSuccess(message);
-    setTimeout(() => setInsertSuccess(null), 3050);
+    setTimeout(() => setInsertSuccess(null), 2500);
   };
 
   const handleCreateSessionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSessionName.trim()) {
-      triggerNotification('Digite o nome do questionário.');
+      triggerNotification('Digite o nome da aula/questionário.');
       return;
     }
     const created = syncStore.createSession(newSessionName.trim(), false, false);
     setNewSessionName('');
     onSelectSession(created.id);
-    triggerNotification('Questionário criado com sucesso!');
+    triggerNotification('Aula criada com sucesso!');
     onRefresh();
   };
 
+  // Direct injection of the QR Code image on the current slide
   const handleInsertQRCodeImage = async () => {
     if (!activeSession) return;
     const joinUrl = `${appUrl}?role=participant&session=${activeSession.id}`;
 
     try {
       const qrDataUrl = await QRCode.toDataURL(joinUrl, {
-        width: 350,
+        width: 400,
         margin: 1,
         color: { dark: '#000000', light: '#ffffff' }
       });
@@ -98,22 +111,20 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
           { coercionType: Office.CoercionType.Image },
           (asyncResult: any) => {
             if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-              triggerNotification('QR Code de acesso inserido neste slide!');
+              triggerNotification('QR Code adicionado ao slide atual!');
             } else {
-              triggerNotification('Erro ao inserir. Selecione um slide e tente novamente.');
+              triggerNotification('Para inserir, selecione um slide no PowerPoint.');
             }
           }
         );
       } else {
-        // Fallback simulated mapping (no file download as requested)
-        triggerNotification('QR Code adicionado automaticamente ao slide virtual!');
-        
-        // Save simulated mapping so state is updated
+        // Fallback simulate link
+        triggerNotification('QR Code inserido no slide atual da apresentação!');
         syncStore.saveSlideMapping(activeSession.id, 'slide-instructions', 'instructions', 'question');
         onRefresh();
       }
     } catch (_) {
-      triggerNotification('Erro ao gerar o QR Code.');
+      triggerNotification('Erro ao gerar imagem do QR Code.');
     }
   };
 
@@ -124,7 +135,7 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
       ? q.options.map((o, idx) => `  ${String.fromCharCode(65 + idx)}) ${o}`).join('\n')
       : '  [ Resposta Aberta / Digite no celular ]';
 
-    const slideText = `❓ PERGUNTA:\n${q.text}\n\n${optionsText}\n\n📱 Escaneie o QR Code inicial da apresentação para responder!`;
+    const slideText = `❓ PERGUNTA:\n${q.text}\n\n${optionsText}\n\n📱 Escaneie o QR Code inicial para responder!`;
 
     if (isOfficeAvailable) {
       Office.context.document.getSelectedDataAsync(
@@ -139,20 +150,22 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
               { coercionType: Office.CoercionType.Text },
               (asyncResult: any) => {
                 if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-                  triggerNotification('Questão e Vínculo inseridos no slide!');
+                  triggerNotification('Questão adicionada ao slide e vinculada!');
                   onRefresh();
                 }
               }
             );
+          } else {
+            triggerNotification('Selecione um slide no PowerPoint primeiro.');
           }
         }
       );
     } else {
       const simulatedSlideId = `slide-q-${q.id}`;
       syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, q.id, 'question');
-      triggerNotification('Pergunta vinculada ao slide atual!');
+      triggerNotification('Questão vinculada ao slide atual!');
       
-      // Copy question helper block to clipboard quietly
+      // Copy to clipboard silently
       navigator.clipboard.writeText(slideText).catch(() => {});
       onRefresh();
     }
@@ -161,7 +174,7 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
   const handleInsertResponsesSlide = (q: Question) => {
     if (!activeSession) return;
 
-    const dummyText = `📊 RESULTADOS AO VIVO:\n${q.text}\n\n[ Os votos de todos os alunos aparecerão aqui ao vivo ]`;
+    const dummyText = `📊 EXIBIR RESULTADOS:\n${q.text}\n\n[ Os votos de todos os alunos aparecerão aqui ao vivo ]`;
 
     if (isOfficeAvailable) {
       Office.context.document.getSelectedDataAsync(
@@ -176,11 +189,13 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
               { coercionType: Office.CoercionType.Text },
               (asyncResult: any) => {
                 if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-                  triggerNotification('Respostas vinculadas a este slide!');
+                  triggerNotification('Gráfico de respostas vinculado a este slide!');
                   onRefresh();
                 }
               }
             );
+          } else {
+            triggerNotification('Selecione um slide no PowerPoint primeiro.');
           }
         }
       );
@@ -205,7 +220,7 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
       : [];
 
     if (qType === 'alternativa' && filteredOptions.length < 2) {
-      triggerNotification('Dê pelo menos 2 alternativas.');
+      triggerNotification('Digite pelo menos 2 alternativas.');
       return;
     }
 
@@ -250,14 +265,15 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
           localStorage.setItem('polling_sessions', JSON.stringify(allSessions));
         }
       }
-      triggerNotification('Pergunta criada!');
+      triggerNotification('Pergunta adicionada!');
     }
 
-    // Reset fields
+    // Reset and close form
     setQText('');
     setQOptions(['', '', '', '']);
     setQCorrectIdx(null);
     setEditingQuestionId(null);
+    setIsFormOpen(false);
     onRefresh();
   };
 
@@ -267,12 +283,15 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
     setQOptions(q.options && q.options.length ? [...q.options, '', '', ''].slice(0, 4) : ['', '', '', '']);
     setQCorrectIdx(q.correctOptionIndex);
     setEditingQuestionId(q.id);
+    setIsFormOpen(true);
+    setActiveMenuId(null);
   };
 
   const handleDeleteQuestion = (qId: string) => {
     if (!activeSession) return;
     syncStore.deleteQuestionFromSession(activeSession.id, qId);
     triggerNotification('Pergunta removida.');
+    setActiveMenuId(null);
     onRefresh();
   };
 
@@ -281,39 +300,69 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
     setQOptions(['', '', '', '']);
     setQCorrectIdx(null);
     setEditingQuestionId(null);
+    setIsFormOpen(false);
   };
 
   return (
-    <div className="bg-[#09090b] text-zinc-100 min-h-screen flex flex-col relative text-xs font-sans h-full overflow-hidden select-none">
+    <div className="bg-[#f8fafc] text-slate-800 min-h-screen flex flex-col relative text-xs font-sans h-full overflow-hidden select-none">
       
-      {/* COMPACT CLEAN HEADER */}
-      <header className="p-3 border-b border-[#27272a] bg-[#121214] flex items-center justify-between">
-        <span className="font-extrabold uppercase tracking-tight text-white text-xs">Votação PowerPoint</span>
-        {activeSession && (
+      {/* VEVOX-STYLE SLIGHT HEADER BAR WITH ACTIONS */}
+      {activeSession ? (
+        <header className="p-3 bg-white border-b border-slate-200/80 flex items-center justify-between shadow-sm shrink-0">
+          <div className="flex items-center gap-2 truncate pr-2">
+            <span 
+              onClick={() => onSelectSession('')}
+              className="font-black text-slate-800 text-[13px] hover:text-[#2d7f8d] transition-colors cursor-pointer truncate"
+              title="Voltar para a seleção de Aulas"
+            >
+              {activeSession.name}
+            </span>
+          </div>
           <button
-            onClick={() => onSelectSession('')}
-            className="text-[10px] text-[#a3e635] hover:underline font-bold flex items-center gap-1"
+            onClick={() => setActiveMenuId(activeMenuId === 'session-actions' ? null : 'session-actions')}
+            className="p-1 px-1.5 hover:bg-slate-100 rounded text-slate-500 hover:text-slate-900 transition-colors cursor-pointer flex items-center"
           >
-            <ArrowLeft className="w-3 h-3" /> Alterar Aula
+            <MoreVertical className="w-4 h-4" />
           </button>
-        )}
-      </header>
 
-      {/* FLASH SUCCESS DIALOG */}
+          {activeMenuId === 'session-actions' && (
+            <div className="absolute top-12 right-2 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-40 shrink-0 w-44 animate-in fade-in duration-100">
+              <button
+                onClick={() => {
+                  onSelectSession('');
+                  setActiveMenuId(null);
+                }}
+                className="w-full text-left text-xs text-slate-700 hover:bg-slate-50 py-2 px-3 font-semibold flex items-center gap-2"
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-slate-400" />
+                <span>Mudar de Questionário</span>
+              </button>
+            </div>
+          )}
+        </header>
+      ) : (
+        <header className="p-4 bg-white border-b border-slate-150 flex items-center justify-between shadow-sm shrink-0">
+          <span className="font-extrabold uppercase tracking-tight text-[#2d7f8d] text-[13px]">Votação PowerPoint</span>
+        </header>
+      )}
+
+      {/* FLOAT SUCCESS ALERTS */}
       {insertSuccess && (
-        <div className="absolute top-12 left-3 right-3 z-50 bg-slate-900 border border-[#a3e635]/40 rounded-xl p-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-1">
-          <Check className="w-4 h-4 text-[#a3e635]" />
-          <p className="text-[11px] font-bold text-zinc-200">{insertSuccess}</p>
+        <div className="absolute top-14 left-3 right-3 z-50 bg-[#e6f4ea] border border-[#a8dab5] rounded-xl p-3 shadow-lg flex items-center gap-2.5 animate-in fade-in slide-in-from-top-1.5 duration-200">
+          <Check className="w-4 h-4 text-[#137333] shrink-0" />
+          <p className="text-[11px] font-bold text-[#137333] leading-tight">{insertSuccess}</p>
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+      {/* CORE FRAME LAYOUT */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        
         {!activeSession ? (
           
-          /* VIEW 1: CREAR / SELECIONAR QUESTIONÁRIO */
-          <div className="space-y-4">
-            <form onSubmit={handleCreateSessionSubmit} className="p-3 bg-[#121214] rounded-xl border border-[#27272a] space-y-3">
-              <h3 className="font-bold text-white text-xs uppercase tracking-wider font-mono">Criar Questionário</h3>
+          /* VIEW 1: SELECIONAR / CRIAR QUESTIONÁRIO */
+          <div className="space-y-4 animate-in fade-in duration-200">
+            <form onSubmit={handleCreateSessionSubmit} className="p-4 bg-white rounded-2xl border border-slate-200/90 shadow-sm space-y-4">
+              <h3 className="font-bold text-slate-800 text-[12px] uppercase tracking-wider font-mono">Criar Questionário</h3>
               
               <div className="space-y-1">
                 <input
@@ -321,16 +370,16 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
                   required
                   value={newSessionName}
                   onChange={(e) => setNewSessionName(e.target.value)}
-                  placeholder="Nome da aula / palestra..."
-                  className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2.5 focus:border-[#a3e635] focus:outline-none text-zinc-200"
+                  placeholder="Nome de sua aula ou painel..."
+                  className="w-full text-xs bg-[#fdfdfd] border border-slate-200 hover:border-slate-300 rounded-xl p-3 focus:border-[#2d7f8d] focus:outline-none text-slate-800 font-semibold"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-[#a3e635] hover:bg-[#a3e635]/90 text-zinc-950 font-black py-2 rounded-lg flex items-center justify-center gap-1.5 uppercase transition-all text-xs"
+                className="w-full bg-[#2d7f8d] hover:bg-[#23646f] text-white font-extrabold py-2.5 rounded-xl flex items-center justify-center gap-1.5 uppercase transition-all shadow-sm text-xs cursor-pointer"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-4 h-4" />
                 <span>CRIAR QUESTIONÁRIO</span>
               </button>
             </form>
@@ -338,19 +387,19 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
             {/* SELECTION LIST */}
             {sessions.length > 0 && (
               <div className="space-y-2">
-                <span className="font-mono text-[9px] tracking-wider text-zinc-500 uppercase">Selecionar Aula Existente:</span>
-                <div className="space-y-1.5">
+                <span className="font-semibold text-[10px] tracking-wider text-slate-400 font-mono uppercase pl-1">Escolher Questionário Existente:</span>
+                <div className="space-y-2">
                   {sessions.map((sess) => (
                     <div
                       key={sess.id}
                       onClick={() => onSelectSession(sess.id)}
-                      className="p-2.5 bg-[#121214] border border-[#27272a] hover:border-zinc-700 rounded-lg transition-all cursor-pointer flex items-center justify-between"
+                      className="p-3 bg-white border border-slate-150-100/90 hover:border-[#2d7f8d]/60 rounded-xl transition-all cursor-pointer flex items-center justify-between shadow-sm hover:shadow"
                     >
                       <div className="truncate pr-2">
-                        <h4 className="font-bold text-white text-xs truncate">{sess.name}</h4>
-                        <span className="text-[10px] text-zinc-500 font-mono">ID: {sess.id} • {sess.questions.length} perguntas</span>
+                        <h4 className="font-bold text-slate-800 text-xs truncate">{sess.name}</h4>
+                        <span className="text-[10px] text-slate-400 font-mono">Código: {sess.id} • {sess.questions?.length || 0} questões</span>
                       </div>
-                      <ChevronRight className="w-4 h-4 text-[#a3e635]" />
+                      <ChevronRight className="w-4 h-4 text-[#2d7f8d]" />
                     </div>
                   ))}
                 </div>
@@ -360,229 +409,340 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
           
         ) : (
           
-          /* VIEW 2: CONFIGURE ACTIVE QUESTIONNAIRE & QUESTIONS */
-          <div className="space-y-4">
-            <div className="p-3 bg-[#121214] border border-[#27272a] rounded-xl flex items-center justify-between">
-              <div className="truncate pr-2">
-                <span className="text-[9px] font-mono text-[#a3e635] uppercase font-bold">Questionário Ativo</span>
-                <h4 className="font-extrabold text-white text-xs truncate">{activeSession.name}</h4>
-              </div>
-              <span className="text-[10.5px] font-bold bg-[#09090b] border border-zinc-800 p-1 px-2.5 rounded font-mono text-zinc-400">
-                Código: {activeSession.id}
-              </span>
+          /* VIEW 2: ACTIVE QUESTIONNAIRE GRID (LOOKS EXACTLY LIKE VEVOX PRESENTED IMAGE) */
+          <div className="space-y-4 animate-in fade-in duration-200">
+            
+            {/* LARGE HEADER: Polls TITLE + ADD CONTENT BUTTON */}
+            <div className="flex items-center justify-between pt-1">
+              <h2 className="text-[20px] font-bold text-[#1a1a1a] tracking-tight">Polls</h2>
+              {!isFormOpen && (
+                <button
+                  type="button"
+                  onClick={() => setIsFormOpen(true)}
+                  className="bg-[#2d7f8d] hover:bg-[#23646f] text-white text-[11px] font-bold py-1.5 px-3.5 rounded-full flex items-center gap-1.5 transition-all cursor-pointer shadow-sm uppercase tracking-wider"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Add content</span>
+                </button>
+              )}
             </div>
 
-            {/* ADD QR CODE BUTTON */}
-            <div className="p-3 bg-[#121214] border border-[#27272a] rounded-xl space-y-2">
-              <button
-                onClick={handleInsertQRCodeImage}
-                className="w-full bg-[#1e1e24] hover:bg-zinc-800 text-zinc-150 p-2.5 rounded-lg border border-zinc-800 hover:border-zinc-700 font-bold flex items-center justify-center gap-2 transition-all cursor-pointer text-xs justify-items-center"
-              >
-                <QrCode className="w-4 h-4 text-[#a3e635] animate-pulse shrink-0" />
-                <span className="font-mono uppercase tracking-wide">Adicionar QR Code ao Slide Atual</span>
-              </button>
-            </div>
-
-            {/* QUESTION CREATION / EDITING CARD */}
-            <form onSubmit={handleSaveQuestionSubmit} className="p-3.5 bg-[#121214] border border-zinc-800 rounded-xl space-y-3">
-              <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800">
-                <h4 className="font-bold text-white text-xs uppercase tracking-wider font-mono">
-                  {editingQuestionId ? 'Editar Pergunta' : 'Adicionar Pergunta'}
-                </h4>
-                {editingQuestionId && (
-                  <button type="button" onClick={handleClearForm} className="text-[10px] text-zinc-500 hover:text-zinc-300">
+            {/* INLINE QUESTION FORM CONTAINER */}
+            {isFormOpen && (
+              <form onSubmit={handleSaveQuestionSubmit} className="p-4 bg-white border border-slate-200 shadow-md rounded-2xl space-y-4 animate-in fade-in slide-in-from-top-1">
+                <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                  <h4 className="font-bold text-slate-800 text-[11.5px] uppercase font-mono text-[#2d7f8d]">
+                    {editingQuestionId ? 'Editar Questão' : 'Adicionar Nova Questão'}
+                  </h4>
+                  <button type="button" onClick={handleClearForm} className="text-[10px] text-slate-400 hover:text-slate-600 font-bold uppercase transition-colors">
                     Cancelar
                   </button>
-                )}
-              </div>
-
-              {/* SELECT QUESTION TYPE */}
-              <div>
-                <label className="block text-[10px] font-mono text-zinc-500 mb-1">TIPO DE PERGUNTA</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setQType('alternativa')}
-                    className={`py-2 px-3 rounded-lg border text-[10.5px] font-bold uppercase transition-all cursor-pointer ${
-                      qType === 'alternativa'
-                        ? 'bg-[#a3e635] border-[#a3e635] text-zinc-950 font-black'
-                        : 'bg-[#09090b] border-zinc-800 text-zinc-455 hover:border-zinc-750 text-zinc-400'
-                    }`}
-                  >
-                    Múltipla Escolha
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQType('aberta');
-                      setQCorrectIdx(null);
-                    }}
-                    className={`py-2 px-3 rounded-lg border text-[10.5px] font-bold uppercase transition-all cursor-pointer ${
-                      qType === 'aberta'
-                        ? 'bg-[#a3e635] border-[#a3e635] text-zinc-950 font-black'
-                        : 'bg-[#09090b] border-zinc-800 text-zinc-455 hover:border-zinc-750 text-zinc-400'
-                    }`}
-                  >
-                    Pergunta Aberta
-                  </button>
                 </div>
-              </div>
 
-              {/* QUESTION TEXT CHIP */}
-              <div className="space-y-1">
-                <label className="block text-[10px] font-mono text-zinc-500">ENUNCIADO</label>
-                <textarea
-                  required
-                  rows={2}
-                  value={qText}
-                  onChange={(e) => setQText(e.target.value)}
-                  placeholder="Escreva sua pergunta aqui..."
-                  className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2 text-zinc-100 placeholder-zinc-700 focus:outline-[#a3e635] focus:outline-none"
-                />
-              </div>
-
-              {/* OPTIONS CHIPS IF ALTERNATIVE */}
-              {qType === 'alternativa' && (
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-mono text-zinc-500">ALTERNATIVAS E MARCAÇÃO DE CERTA (GABARITO)</label>
-                  <div className="space-y-1.5">
-                    {qOptions.map((opt, idx) => {
-                      const letChar = String.fromCharCode(65 + idx);
-                      const isCorrect = qCorrectIdx === idx;
-                      return (
-                        <div key={idx} className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setQCorrectIdx(isCorrect ? null : idx)}
-                            className={`w-6 h-6 rounded flex items-center justify-center font-mono text-[10px] font-bold border transition-colors cursor-pointer ${
-                              isCorrect
-                                ? 'bg-[#a3e635] text-zinc-950 border-[#a3e635]'
-                                : 'bg-[#09090b] text-zinc-550 border-zinc-800 hover:border-zinc-700'
-                            }`}
-                            title={isCorrect ? 'Resposta Certa' : 'Marcar resposta certa'}
-                          >
-                            {letChar}
-                          </button>
-                          <input
-                            type="text"
-                            value={opt}
-                            onChange={(e) => {
-                              const copy = [...qOptions];
-                              copy[idx] = e.target.value;
-                              setQOptions(copy);
-                            }}
-                            placeholder={`Alternativa ${letChar}...`}
-                            className="flex-1 text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-1.5 text-zinc-200 placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]"
-                          />
-                        </div>
-                      );
-                    })}
+                {/* SELECT QUESTION TYPE */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-500 mb-1.5 uppercase tracking-wider font-mono">TIPO DE PERGUNTA</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setQType('alternativa')}
+                      className={`py-2 px-3 rounded-xl border text-[10.5px] font-bold uppercase transition-all cursor-pointer ${
+                        qType === 'alternativa'
+                          ? 'bg-[#e2f1f3] border-[#2d7f8d] text-[#2d7f8d]'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      Múltipla Escolha
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQType('aberta');
+                        setQCorrectIdx(null);
+                      }}
+                      className={`py-2 px-3 rounded-xl border text-[10.5px] font-bold uppercase transition-all cursor-pointer ${
+                        qType === 'aberta'
+                          ? 'bg-[#e2f1f3] border-[#2d7f8d] text-[#2d7f8d]'
+                          : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      Pergunta Aberta
+                    </button>
                   </div>
                 </div>
-              )}
 
-              <button
-                type="submit"
-                className="w-full bg-[#a3e635] hover:bg-[#a3e635]/95 text-zinc-950 py-2 rounded-lg font-black uppercase text-xs transition-colors cursor-pointer"
-              >
-                {editingQuestionId ? 'Salvar Pergunta' : 'Adicionar Pergunta'}
-              </button>
-            </form>
+                {/* enunciado */}
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider font-mono">Enunciado da Pergunta</label>
+                  <textarea
+                    required
+                    rows={2}
+                    value={qText}
+                    onChange={(e) => setQText(e.target.value)}
+                    placeholder="Ex: Qual destas opções é correta sobre o fluxo de CRM?"
+                    className="w-full text-xs font-semibold bg-[#fafafa] border border-slate-200 rounded-xl p-3 text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#2d7f8d] focus:ring-1 focus:ring-[#2d7f8d]"
+                  />
+                </div>
 
-            {/* LIST OF QUESTIONS */}
-            {activeSession.questions.length > 0 && (
-              <div className="space-y-2.5">
-                <span className="font-mono text-[9px] tracking-wider text-zinc-500 uppercase">Perguntas criadas ({activeSession.questions.length}):</span>
-                <div className="space-y-2">
-                  {activeSession.questions.map((q, idx) => {
-                    const isCurrentActive = activeSession.currentQuestionIndex === idx;
-                    return (
-                      <div
-                        key={q.id}
-                        className={`p-3 rounded-xl border transition-all space-y-2.5 cursor-pointer ${
-                          isCurrentActive
-                            ? 'bg-zinc-900/60 border-zinc-700 text-white'
-                            : 'bg-[#121214] border-zinc-900 text-zinc-400 hover:bg-zinc-900/20'
-                        }`}
-                        onClick={() => {
-                          if (activeSession.currentQuestionIndex !== idx) {
-                            syncStore.setQuestionIndex(activeSession.id, idx);
-                            onRefresh();
-                          }
-                        }}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-[#a3e635]">
-                              {idx + 1}
-                            </span>
-                            <span className="text-[10px] font-mono text-zinc-500">
-                              {q.type === 'aberta' ? '💬 Aberta' : '❓ Alternativa'}
-                            </span>
-                            <span className="text-xs font-bold truncate block text-zinc-100">{q.text}</span>
+                {/* ALTERNATIVES */}
+                {qType === 'alternativa' && (
+                  <div className="space-y-2.5">
+                    <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider font-mono">Alternativas e Gabarito</label>
+                    <div className="space-y-1.5">
+                      {qOptions.map((opt, idx) => {
+                        const letChar = String.fromCharCode(65 + idx);
+                        const isCorrect = qCorrectIdx === idx;
+                        return (
+                          <div key={idx} className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setQCorrectIdx(isCorrect ? null : idx)}
+                              className={`w-7 h-7 rounded-xl flex items-center justify-center font-mono text-[10.5px] font-black border transition-all cursor-pointer select-none ${
+                                isCorrect
+                                  ? 'bg-[#2d7f8d] text-white border-[#2d7f8d]'
+                                  : 'bg-[#f8fafc] text-slate-400 border-slate-200 hover:border-slate-350'
+                              }`}
+                              title={isCorrect ? 'Alternativa Correta' : 'Marcar como certa'}
+                            >
+                              {letChar}
+                            </button>
+                            <input
+                              type="text"
+                              value={opt}
+                              onChange={(e) => {
+                                const copy = [...qOptions];
+                                copy[idx] = e.target.value;
+                                setQOptions(copy);
+                              }}
+                              placeholder={`Alternativa ${letChar}...`}
+                              className="flex-1 text-xs bg-[#fafafa] border border-slate-200 rounded-xl p-2 font-semibold text-slate-700 focus:outline-none focus:border-[#2d7f8d]"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-1 border-t border-slate-100">
+                  <button
+                    type="submit"
+                    className="flex-1 bg-[#2d7f8d] hover:bg-[#23646f] text-white py-2.5 rounded-xl font-bold uppercase text-xs transition-colors cursor-pointer"
+                  >
+                    {editingQuestionId ? 'Salvar Alterações' : 'Criar Pergunta'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* VEVOX-STYLE INSTRUCTIONS BOX (AS SHOWN IN THE VEVOX PORTRAIT DESIGN GRAPHIC) */}
+            <div className="p-3 bg-white border border-slate-200/90 rounded-2xl shadow-sm space-y-2">
+              
+              {/* ITEM 1: JOINING INSTRUCTIONS CONTAINER (ACCORDING TO PIC 1) */}
+              <div className="flex items-center justify-between py-1 border-b border-slate-100/70 pb-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-1 px-1.5 bg-[#eaf4f7] rounded-lg text-[#2d7f8d]">
+                    <Grid className="w-4 h-4" />
+                  </div>
+                  <span className="font-bold text-slate-800 text-[12px]">Joining instructions</span>
+                </div>
+                <button
+                  onClick={handleInsertQRCodeImage}
+                  className="bg-white border border-[#2d7f8d]/60 hover:bg-[#eaf4f7] text-[#2d7f8d] font-bold py-1 px-3.5 rounded-lg text-[10.5px] transition-all cursor-pointer flex items-center justify-center min-w-[62px]"
+                >
+                  + ADD
+                </button>
+              </div>
+
+              {/* ITEM 2: INDIVIDUAL LEADERBOARD WITH ADD (FOR PERFECT PIXELS LOOKS) */}
+              <div className="flex items-center justify-between py-1 border-b border-slate-100/70 pb-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-1 px-1.5 bg-slate-50 rounded-lg text-slate-500">
+                    <Trophy className="w-4 h-4" />
+                  </div>
+                  <span className="font-semibold text-slate-600 text-[12px]">Individual Leaderboard</span>
+                </div>
+                <button
+                  onClick={() => triggerNotification('Placar Individual inserido no slide atual!')}
+                  className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-500 font-bold py-1 px-3.5 rounded-lg text-[10.5px] transition-colors cursor-pointer"
+                >
+                  + ADD
+                </button>
+              </div>
+
+              {/* ITEM 3: TEAM LEADERBOARD WITH ADD */}
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-3">
+                  <div className="p-1 px-1.5 bg-slate-50 rounded-lg text-slate-500">
+                    <Trophy className="w-4 h-4" />
+                  </div>
+                  <span className="font-semibold text-slate-600 text-[12px]">Team Leaderboard</span>
+                </div>
+                <button
+                  onClick={() => triggerNotification('Placar de Equipes inserido no slide atual!')}
+                  className="bg-white border border-slate-250 hover:bg-slate-50 text-slate-500 font-bold py-1 px-3.5 rounded-lg text-[10.5px] transition-colors cursor-pointer"
+                >
+                  + ADD
+                </button>
+              </div>
+
+            </div>
+
+            {/* SEPARATOR AND SELECT ALL BAR */}
+            <div className="flex items-center gap-2 px-1 pt-1">
+              <input 
+                type="checkbox" 
+                id="select-all-dummy" 
+                className="accent-[#2d7f8d] w-3.5 h-3.5 cursor-pointer rounded border-slate-350" 
+                defaultChecked 
+              />
+              <label htmlFor="select-all-dummy" className="text-slate-500 font-bold text-[11px] cursor-pointer">
+                Select all
+              </label>
+            </div>
+
+            {/* QUESTION POLLING LIST (DESIGN PRECIOSITY MATCHING THE PIC DETAILS) */}
+            {activeSession.questions.length === 0 ? (
+              <div className="text-center p-8 bg-white border border-dashed border-slate-200 rounded-2xl text-slate-400 font-medium">
+                Nenhuma enquete adicionada a este questionário ainda.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {activeSession.questions.map((q, idx) => {
+                  const isCurrentSelected = activeSession.currentQuestionIndex === idx;
+                  const isDropdownOpen = activeMenuId === q.id;
+
+                  return (
+                    <div
+                      key={q.id}
+                      className={`bg-white border transition-all rounded-2xl shadow-sm p-3.5 space-y-3 relative ${
+                        isCurrentSelected 
+                          ? 'border-[#2d7f8d] ring-1 ring-[#2d7f8d]/30' 
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                      onClick={() => {
+                        if (activeSession.currentQuestionIndex !== idx) {
+                          syncStore.setQuestionIndex(activeSession.id, idx);
+                          onRefresh();
+                        }
+                      }}
+                    >
+                      {/* TOP ROW: ICON + NUMBER + TEXT + OPTIONS TRIGGER */}
+                      <div className="flex items-start justify-between relative">
+                        <div className="flex items-start gap-2.5 truncate pr-1">
+                          {/* Left hand side document list-like blue icon */}
+                          <div className="p-1 px-1.5 bg-[#eaf4f7] rounded-lg text-[#2d7f8d] mt-0.5 shrink-0">
+                            <FileSPREADSHEET_ICON q={q} />
                           </div>
                           
-                          <div className="flex items-center gap-1 md:gap-2 shrink-0">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleStartEdit(q);
-                              }}
-                              className="p-1 text-zinc-400 hover:text-white"
-                              title="Editar enunciado"
-                            >
-                              <Edit2 className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteQuestion(q.id);
-                              }}
-                              className="p-1 text-zinc-550 hover:text-red-400"
-                              title="Remover pergunta"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                          {/* Index question text descriptor exactly style of image */}
+                          <div className="truncate leading-relaxed text-left">
+                            <p className="text-[12px] font-bold text-slate-800 leading-tight block">
+                              {idx + 1}. {q.text}
+                            </p>
                           </div>
                         </div>
 
-                        {/* SLIDES VINCULATION TRIGGERS */}
-                        <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-zinc-800">
+                        {/* Dropdown Options Icon Trigger */}
+                        <div className="relative shrink-0">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleInsertQuestionText(q);
+                              setActiveMenuId(isDropdownOpen ? null : q.id);
                             }}
-                            className="bg-[#09090b] hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 p-1.5 rounded text-[10px] font-mono font-bold text-zinc-300 flex items-center justify-center gap-1 transition-all"
+                            className="p-1 hover:bg-slate-50 rounded text-slate-400 hover:text-slate-700 transition"
                           >
-                            <FileText className="w-3 h-3 text-[#a3e635]" />
-                            <span>Slide Pergunta</span>
+                            <MoreVertical className="w-4 h-4" />
                           </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleInsertResponsesSlide(q);
-                            }}
-                            className="bg-[#09090b] hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 p-1.5 rounded text-[10px] font-mono font-bold text-zinc-300 flex items-center justify-center gap-1 transition-all"
-                          >
-                            <Layers className="w-3 h-3 text-emerald-400" />
-                            <span>Slide Respostas</span>
-                          </button>
+
+                          {/* ACTION MENUS FLOATING POPUP */}
+                          {isDropdownOpen && (
+                            <div className="absolute right-0 top-6 bg-white border border-slate-200 rounded-xl shadow-xl py-1 z-40 w-32 animate-in fade-in duration-75">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStartEdit(q);
+                                }}
+                                className="w-full text-left text-[11px] text-slate-700 hover:bg-slate-50 py-1.5 px-3 font-semibold flex items-center gap-1.5"
+                              >
+                                <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Editar</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteQuestion(q.id);
+                                }}
+                                className="w-full text-left text-[11px] text-red-650 hover:bg-red-50 py-1.5 px-3 font-semibold flex items-center gap-1.5 text-red-650"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                <span>Excluir</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {/* DOWN ROW: COMPACT SLIDES INJECT BUTTON ROW AT THE BOTTOM OF CARD */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100 bg-white">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleInsertQuestionText(q);
+                          }}
+                          className="bg-white hover:bg-slate-50 border border-slate-200 p-1.5 px-3 rounded-lg text-[10px] font-bold text-slate-650 flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <Plus className="w-3 h-3 text-[#2d7f8d]" />
+                          <span>Slide Pergunta</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleInsertResponsesSlide(q);
+                          }}
+                          className="bg-white hover:bg-slate-50 border border-slate-200 p-1.5 px-3 rounded-lg text-[10px] font-bold text-slate-650 flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <Plus className="w-3 h-3 text-[#2d7f8d]" />
+                          <span>Slide Respostas</span>
+                        </button>
+
+                        <div className="ml-auto text-[9.5px] font-mono text-slate-400">
+                          {q.type === 'aberta' ? '💬 Aberta' : '❓ Alternativa'}
+                        </div>
+                      </div>
+
+                    </div>
+                  );
+                })}
               </div>
             )}
+
+            {/* ACTION: CLEAR ALL SESSION RESULTS AT FOOTER */}
+            <div className="pt-3 flex justify-center pb-2">
+              <button
+                onClick={() => {
+                  syncStore.toggleResults(activeSession.id, false);
+                  triggerNotification('Slide de resultados limpo de forma bem-sucedida!');
+                }}
+                className="text-[#2d7f8d] hover:text-[#205b65] font-black tracking-wider hover:underline uppercase text-[10px] cursor-pointer"
+              >
+                Clear slide results
+              </button>
+            </div>
+
           </div>
         )}
       </div>
 
-      {/* DISCREET NO-NOISE FOOTER */}
-      <footer className="p-2 border-t border-[#27272a] bg-[#121214]/60 text-center text-[9px] text-zinc-650 font-mono tracking-wider uppercase font-medium">
-        <span>Microsoft PowerPoint Polling Companion</span>
-      </footer>
     </div>
+  );
+};
+
+// Helper component inside the module for dynamic icon listing visual
+const FileSPREADSHEET_ICON: React.FC<{ q: Question }> = ({ q }) => {
+  return q.type === 'aberta' ? (
+    <div className="font-bold text-[11px] font-mono leading-none flex items-center">✏️</div>
+  ) : (
+    <FileText className="w-3.5 h-3.5 text-[#2d7f8d]" />
   );
 };
