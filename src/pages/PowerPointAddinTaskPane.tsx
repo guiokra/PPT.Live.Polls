@@ -5,32 +5,20 @@
 
 import React, { useState, useEffect } from 'react';
 import { syncStore } from '../services/store';
-import { Session, Question, SlideMapping } from '../types';
-import { QRCodeDisplay } from '../components/QRCodeDisplay';
+import { Session, Question } from '../types';
 import { 
   FileText, 
   Layers, 
   QrCode, 
   Plus, 
-  Info,
-  Copy,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Trash2,
-  Edit2,
-  HelpCircle,
-  Eye,
-  EyeOff,
-  Laptop,
-  Sparkles,
-  Link,
-  RefreshCw,
-  FolderPlus
+  Check, 
+  ChevronRight, 
+  Trash2, 
+  Edit2, 
+  ArrowLeft
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
-// Core OfficeJS helper
 declare const Office: any;
 
 interface PowerPointAddinTaskPaneProps {
@@ -49,289 +37,49 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
   appUrl
 }) => {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [officeStatus, setOfficeStatus] = useState<string>('Buscando ambiente Office...');
   const [isOfficeAvailable, setIsOfficeAvailable] = useState<boolean>(false);
   const [insertSuccess, setInsertSuccess] = useState<string | null>(null);
-  
-  // Simulated Slides State (for testing in the browser iframe)
-  const [simulatedSlides, setSimulatedSlides] = useState<Array<{ id: string; label: string; active: boolean }>>([
-    { id: 'slide-instructions', label: 'Slide 1: QR Code', active: true }
-  ]);
-  const [activeSimulatedSlideId, setActiveSimulatedSlideId] = useState<string>('slide-instructions');
 
-  // Question Creation Form State (simplifying views)
-  const [isAddingQuestion, setIsAddingQuestion] = useState<boolean>(false);
-  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  // Question Form State (inline & streamlined)
   const [qText, setQText] = useState<string>('');
   const [qType, setQType] = useState<'alternativa' | 'aberta'>('alternativa');
-  const [qResultsView, setQResultsView] = useState<'live' | 'results-slide-only'>('results-slide-only');
   const [qOptions, setQOptions] = useState<string[]>(['', '', '', '']);
   const [qCorrectIdx, setQCorrectIdx] = useState<number | null>(null);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
 
-  // New session inline creator state
-  const [isAddingSession, setIsAddingSession] = useState<boolean>(false);
+  // Session inline creator
   const [newSessionName, setNewSessionName] = useState<string>('');
-  const [isQuizMode, setIsQuizMode] = useState<boolean>(false);
 
-  // Load and refresh state
   useEffect(() => {
     setSessions(syncStore.getSessions().filter(s => s.status === 'active'));
 
-    // Detect Real Microsoft Office Environment
     if (typeof Office !== 'undefined') {
       Office.onReady((info: any) => {
         if (info.host === Office.HostType.PowerPoint) {
           setIsOfficeAvailable(true);
-          setOfficeStatus('Conectado ao PowerPoint');
-        } else {
-          setOfficeStatus('Modo Web (Office carregado)');
         }
       });
-    } else {
-      setOfficeStatus('Modo Web (Slides Simulados)');
     }
   }, [activeSession]);
 
-  // Update simulated slides whenever questions change
-  useEffect(() => {
-    if (!activeSession) return;
-    const slides = [{ id: 'slide-instructions', label: 'Slide 1: QR Code de Acesso', active: activeSimulatedSlideId === 'slide-instructions' }];
-    
-    // Add slide questions & answers for mapping
-    activeSession.questions.forEach((q, qIdx) => {
-      const qSlideId = `slide-q-${q.id}`;
-      const rSlideId = `slide-r-${q.id}`;
-
-      slides.push({
-        id: qSlideId,
-        label: `Slide ${slides.length + 1}: ❓ Pergunta ${qIdx + 1}`,
-        active: activeSimulatedSlideId === qSlideId
-      });
-
-      slides.push({
-        id: rSlideId,
-        label: `Slide ${slides.length + 1}: 📊 Gráfico P${qIdx + 1}`,
-        active: activeSimulatedSlideId === rSlideId
-      });
-    });
-
-    setSimulatedSlides(slides);
-  }, [activeSession?.questions, activeSimulatedSlideId]);
-
-  // PowerPoint Event Listener for slide change
-  useEffect(() => {
-    if (!isOfficeAvailable || !activeSession) return;
-
-    let eventHandler = () => {
-      Office.context.document.getSelectedDataAsync(
-        Office.CoercionType.SlideRange,
-        (result: any) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) {
-            const slideRange = result.value;
-            if (slideRange && slideRange.slides && slideRange.slides.length > 0) {
-              const currentSlideId = slideRange.slides[0].id;
-              syncToCurrentSlideId(currentSlideId);
-            }
-          }
-        }
-      );
-    };
-
-    Office.context.document.addHandlerAsync(
-      Office.EventType.DocumentSelectionChanged,
-      eventHandler,
-      (asyncResult: any) => {
-        if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-          console.log("PPT Selection Changed Listener Registered.");
-        }
-      }
-    );
-
-    return () => {
-      try {
-        Office.context.document.removeHandlerAsync(
-          Office.EventType.DocumentSelectionChanged,
-          { handler: eventHandler }
-        );
-      } catch (_) {}
-    };
-  }, [isOfficeAvailable, activeSession?.id, activeSession?.questions]);
-
-  // Dispatch slide movement transitions
-  const syncToCurrentSlideId = (slideId: string) => {
-    if (!activeSession) return;
-
-    // Fetch mappings for current session
-    const session = syncStore.getSession(activeSession.id);
-    const mappings = session?.slideMappings || [];
-    const matched = mappings.find(m => m.slideId === slideId);
-
-    if (matched) {
-      const qIndex = activeSession.questions.findIndex(q => q.id === matched.questionId);
-      if (qIndex >= 0) {
-        // Set active index
-        syncStore.setQuestionIndex(activeSession.id, qIndex);
-
-        // Turn on/off results visibility based on slide style preference
-        if (matched.slideType === 'responses') {
-          syncStore.toggleResults(activeSession.id, true);
-        } else {
-          // It's the question slide itself
-          const currentQ = activeSession.questions[qIndex];
-          const shouldShowLive = currentQ.resultsView === 'live';
-          syncStore.toggleResults(activeSession.id, shouldShowLive);
-        }
-        onRefresh();
-      }
-    }
-  };
-
-  // Simulate slide trigger click in browser pane
-  const handleSimulateSlideClick = (slideId: string) => {
-    setActiveSimulatedSlideId(slideId);
-    
-    // Auto sync state inside database
-    if (activeSession) {
-      if (slideId === 'slide-instructions') {
-        // Just holding QR Code slide, no active index shift is mandatory
-        return;
-      }
-
-      // Check if this slide ID has a simulated mapping, if not create/mock it on the fly!
-      const session = syncStore.getSession(activeSession.id);
-      const currentMappings = session?.slideMappings || [];
-      let matched = currentMappings.find(m => m.slideId === slideId);
-
-      if (!matched) {
-        // Map on-the-fly for simulator convenience
-        const qIdToMap = slideId.replace('slide-q-', '').replace('slide-r-', '');
-        const isResponsesType = slideId.startsWith('slide-r-');
-        
-        syncStore.saveSlideMapping(
-          activeSession.id,
-          slideId,
-          qIdToMap,
-          isResponsesType ? 'responses' : 'question'
-        );
-      }
-
-      syncToCurrentSlideId(slideId);
-    }
-  };
-
   const triggerNotification = (message: string) => {
     setInsertSuccess(message);
-    setTimeout(() => setInsertSuccess(null), 3000);
+    setTimeout(() => setInsertSuccess(null), 3050);
   };
 
-  // Control carousel navigation indices
-  const handlePrevQuestion = () => {
-    if (!activeSession) return;
-    const newIdx = Math.max(0, activeSession.currentQuestionIndex - 1);
-    syncStore.setQuestionIndex(activeSession.id, newIdx);
+  const handleCreateSessionSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSessionName.trim()) {
+      triggerNotification('Digite o nome do questionário.');
+      return;
+    }
+    const created = syncStore.createSession(newSessionName.trim(), false, false);
+    setNewSessionName('');
+    onSelectSession(created.id);
+    triggerNotification('Questionário criado com sucesso!');
     onRefresh();
   };
 
-  const handleNextQuestion = () => {
-    if (!activeSession) return;
-    const newIdx = Math.min(activeSession.questions.length - 1, activeSession.currentQuestionIndex + 1);
-    syncStore.setQuestionIndex(activeSession.id, newIdx);
-    onRefresh();
-  };
-
-  // Inserir Pergunta no Slide Atual (Writes Text + maps current slide ID)
-  const handleInsertQuestionText = () => {
-    if (!activeSession) return;
-    const currentQ = activeSession.questions[activeSession.currentQuestionIndex];
-    if (!currentQ) return;
-
-    // Get alternatives block if multiple choices
-    const optionsText = currentQ.type === 'alternativa'
-      ? currentQ.options.map((o, idx) => `  ${String.fromCharCode(65 + idx)}) ${o}`).join('\n')
-      : '  [ Resposta Aberta / Digite no celular ]';
-
-    const slideText = `❓ PERGUNTA:\n${currentQ.text}\n\n${optionsText}\n\n📱 Escaneie o QR Code inicial da apresentação para responder!`;
-
-    if (isOfficeAvailable) {
-      // 1. Get slide ID
-      Office.context.document.getSelectedDataAsync(
-        Office.CoercionType.SlideRange,
-        (result: any) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded && result.value.slides.length > 0) {
-            const slideId = result.value.slides[0].id;
-            
-            // 2. Save Mapping
-            syncStore.saveSlideMapping(activeSession.id, slideId, currentQ.id, 'question');
-            
-            // 3. Inject text safely
-            Office.context.document.setSelectedDataAsync(
-              slideText,
-              { coercionType: Office.CoercionType.Text },
-              (asyncResult: any) => {
-                if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-                  triggerNotification('Questão e Vínculo inseridos no slide!');
-                  onRefresh();
-                } else {
-                  triggerNotification('Erro ao injetar texto.');
-                }
-              }
-            );
-          }
-        }
-      );
-    } else {
-      // Simulated Mode mapping
-      const simulatedSlideId = `slide-q-${currentQ.id}`;
-      syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, currentQ.id, 'question');
-      triggerNotification('Vínculo criado no (Slide de Pergunta)! Cole o conteúdo no PowerPoint.');
-      
-      // Copy question helper block
-      navigator.clipboard.writeText(slideText).catch(() => {});
-      onRefresh();
-    }
-  };
-
-  // Inserir Slide de Respostas (Writes results link + maps slide ID)
-  const handleInsertResponsesSlide = () => {
-    if (!activeSession) return;
-    const currentQ = activeSession.questions[activeSession.currentQuestionIndex];
-    if (!currentQ) return;
-
-    const dummyText = `📊 RESULTADOS AO VIVO:\n${currentQ.text}\n\n[ Os votos de todos os alunos aparecerão aqui ao vivo ]`;
-
-    if (isOfficeAvailable) {
-      Office.context.document.getSelectedDataAsync(
-        Office.CoercionType.SlideRange,
-        (result: any) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded && result.value.slides.length > 0) {
-            const slideId = result.value.slides[0].id;
-            
-            // Save responses mapping
-            syncStore.saveSlideMapping(activeSession.id, slideId, currentQ.id, 'responses');
-            
-            // Inserir marcação
-            Office.context.document.setSelectedDataAsync(
-              dummyText,
-              { coercionType: Office.CoercionType.Text },
-              (asyncResult: any) => {
-                if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-                  triggerNotification('Gráfico e Vínculo vinculados a este slide!');
-                  onRefresh();
-                }
-              }
-            );
-          }
-        }
-      );
-    } else {
-      const simulatedSlideId = `slide-r-${currentQ.id}`;
-      syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, currentQ.id, 'responses');
-      triggerNotification('Vínculo de Resultados criado! (Slide de Respostas)');
-      onRefresh();
-    }
-  };
-
-  // Insert QR Code Image to Slide
   const handleInsertQRCodeImage = async () => {
     if (!activeSession) return;
     const joinUrl = `${appUrl}?role=participant&session=${activeSession.id}`;
@@ -350,66 +98,118 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
           { coercionType: Office.CoercionType.Image },
           (asyncResult: any) => {
             if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-              triggerNotification('QR Code inserido com sucesso!');
+              triggerNotification('QR Code de acesso inserido neste slide!');
             } else {
-              triggerNotification('Erro ao inserir QR Code.');
+              triggerNotification('Erro ao inserir. Selecione um slide e tente novamente.');
             }
           }
         );
       } else {
-        // Fallback: Copy URL and trigger file download
-        const link = document.createElement('a');
-        link.href = qrDataUrl;
-        link.download = `qrcode-sala-${activeSession.id}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        triggerNotification('QR Code baixado de forma bem sucedida! Cole-o no PowerPoint.');
+        // Fallback simulated mapping (no file download as requested)
+        triggerNotification('QR Code adicionado automaticamente ao slide virtual!');
+        
+        // Save simulated mapping so state is updated
+        syncStore.saveSlideMapping(activeSession.id, 'slide-instructions', 'instructions', 'question');
+        onRefresh();
       }
-    } catch (_) {}
+    } catch (_) {
+      triggerNotification('Erro ao gerar o QR Code.');
+    }
   };
 
-  // Create or update questions inline
-  const handleOpenNewQuestion = () => {
-    setQText('');
-    setQType('alternativa');
-    setQResultsView('results-slide-only');
-    setQOptions(['', '', '', '']);
-    setQCorrectIdx(null);
-    setEditingQuestionId(null);
-    setIsAddingQuestion(true);
+  const handleInsertQuestionText = (q: Question) => {
+    if (!activeSession) return;
+
+    const optionsText = q.type === 'alternativa'
+      ? q.options.map((o, idx) => `  ${String.fromCharCode(65 + idx)}) ${o}`).join('\n')
+      : '  [ Resposta Aberta / Digite no celular ]';
+
+    const slideText = `❓ PERGUNTA:\n${q.text}\n\n${optionsText}\n\n📱 Escaneie o QR Code inicial da apresentação para responder!`;
+
+    if (isOfficeAvailable) {
+      Office.context.document.getSelectedDataAsync(
+        Office.CoercionType.SlideRange,
+        (result: any) => {
+          if (result.status === Office.AsyncResultStatus.Succeeded && result.value.slides.length > 0) {
+            const slideId = result.value.slides[0].id;
+            syncStore.saveSlideMapping(activeSession.id, slideId, q.id, 'question');
+            
+            Office.context.document.setSelectedDataAsync(
+              slideText,
+              { coercionType: Office.CoercionType.Text },
+              (asyncResult: any) => {
+                if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
+                  triggerNotification('Questão e Vínculo inseridos no slide!');
+                  onRefresh();
+                }
+              }
+            );
+          }
+        }
+      );
+    } else {
+      const simulatedSlideId = `slide-q-${q.id}`;
+      syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, q.id, 'question');
+      triggerNotification('Pergunta vinculada ao slide atual!');
+      
+      // Copy question helper block to clipboard quietly
+      navigator.clipboard.writeText(slideText).catch(() => {});
+      onRefresh();
+    }
   };
 
-  const handleOpenEditQuestion = (q: Question) => {
-    setQText(q.text);
-    setQType(q.type || 'alternativa');
-    setQResultsView(q.resultsView || 'results-slide-only');
-    setQOptions([...(q.options || ['', '', '', ''])]);
-    setQCorrectIdx(q.correctOptionIndex);
-    setEditingQuestionId(q.id);
-    setIsAddingQuestion(true);
+  const handleInsertResponsesSlide = (q: Question) => {
+    if (!activeSession) return;
+
+    const dummyText = `📊 RESULTADOS AO VIVO:\n${q.text}\n\n[ Os votos de todos os alunos aparecerão aqui ao vivo ]`;
+
+    if (isOfficeAvailable) {
+      Office.context.document.getSelectedDataAsync(
+        Office.CoercionType.SlideRange,
+        (result: any) => {
+          if (result.status === Office.AsyncResultStatus.Succeeded && result.value.slides.length > 0) {
+            const slideId = result.value.slides[0].id;
+            syncStore.saveSlideMapping(activeSession.id, slideId, q.id, 'responses');
+            
+            Office.context.document.setSelectedDataAsync(
+              dummyText,
+              { coercionType: Office.CoercionType.Text },
+              (asyncResult: any) => {
+                if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
+                  triggerNotification('Respostas vinculadas a este slide!');
+                  onRefresh();
+                }
+              }
+            );
+          }
+        }
+      );
+    } else {
+      const simulatedSlideId = `slide-r-${q.id}`;
+      syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, q.id, 'responses');
+      triggerNotification('Gráfico de respostas vinculado ao slide atual!');
+      onRefresh();
+    }
   };
 
   const handleSaveQuestionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeSession) return;
     if (qText.trim() === '') {
-      triggerNotification('Preencha o enunciado.');
+      triggerNotification('Digite o enunciado da pergunta.');
       return;
     }
 
-    // Process options
     const filteredOptions = qType === 'alternativa'
       ? qOptions.map(o => o.trim()).filter(o => o !== '')
       : [];
 
     if (qType === 'alternativa' && filteredOptions.length < 2) {
-      triggerNotification('Insira pelo menos 2 alternativas.');
+      triggerNotification('Dê pelo menos 2 alternativas.');
       return;
     }
 
     if (editingQuestionId) {
-      // Edit mode
       syncStore.updateQuestionInSession(
         activeSession.id,
         editingQuestionId,
@@ -418,21 +218,18 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
         qType === 'alternativa' ? qCorrectIdx : null
       );
 
-      // Force update question metadata fields separately
-      const updatedSessions = syncStore.getSessions();
-      const updatedS = updatedSessions.find(s => s.id === activeSession.id);
-      if (updatedS) {
-        const targetQ = updatedS.questions.find(q => q.id === editingQuestionId);
+      // Force type & metadata sync
+      const allSessions = syncStore.getSessions();
+      const s = allSessions.find(sess => sess.id === activeSession.id);
+      if (s) {
+        const targetQ = s.questions.find(quest => quest.id === editingQuestionId);
         if (targetQ) {
           targetQ.type = qType;
-          targetQ.resultsView = qResultsView;
         }
-        localStorage.setItem('polling_sessions', JSON.stringify(updatedSessions));
+        localStorage.setItem('polling_sessions', JSON.stringify(allSessions));
       }
-
-      triggerNotification('Pergunta atualizada.');
+      triggerNotification('Pergunta atualizada!');
     } else {
-      // Create brand new
       const currentS = syncStore.getSession(activeSession.id);
       if (currentS) {
         const newId = `q-${Date.now()}`;
@@ -442,59 +239,64 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
           options: filteredOptions,
           correctOptionIndex: qType === 'alternativa' ? qCorrectIdx : null,
           type: qType,
-          resultsView: qResultsView
+          resultsView: 'results-slide-only'
         };
         currentS.questions.push(newQuestion);
         
-        // Save back
         const allSessions = syncStore.getSessions();
-        const foundIdx = allSessions.findIndex(s => s.id === activeSession.id);
+        const foundIdx = allSessions.findIndex(sess => sess.id === activeSession.id);
         if (foundIdx >= 0) {
           allSessions[foundIdx] = currentS;
           localStorage.setItem('polling_sessions', JSON.stringify(allSessions));
         }
       }
-      triggerNotification('Pergunta criada com sucesso!');
+      triggerNotification('Pergunta criada!');
     }
 
-    setIsAddingQuestion(false);
+    // Reset fields
+    setQText('');
+    setQOptions(['', '', '', '']);
+    setQCorrectIdx(null);
+    setEditingQuestionId(null);
     onRefresh();
+  };
+
+  const handleStartEdit = (q: Question) => {
+    setQText(q.text);
+    setQType(q.type || 'alternativa');
+    setQOptions(q.options && q.options.length ? [...q.options, '', '', ''].slice(0, 4) : ['', '', '', '']);
+    setQCorrectIdx(q.correctOptionIndex);
+    setEditingQuestionId(q.id);
   };
 
   const handleDeleteQuestion = (qId: string) => {
     if (!activeSession) return;
     syncStore.deleteQuestionFromSession(activeSession.id, qId);
-    triggerNotification('Pergunta excluída.');
+    triggerNotification('Pergunta removida.');
     onRefresh();
   };
 
-  const handleCreateSessionInline = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSessionName.trim()) {
-      triggerNotification('Escreva o nome da sessão.');
-      return;
-    }
-    const created = syncStore.createSession(newSessionName.trim(), false, isQuizMode);
-    setNewSessionName('');
-    setIsQuizMode(false);
-    setIsAddingSession(false);
-    onSelectSession(created.id);
-    triggerNotification(`Sessão "${created.name}" criada.`);
-    onRefresh();
+  const handleClearForm = () => {
+    setQText('');
+    setQOptions(['', '', '', '']);
+    setQCorrectIdx(null);
+    setEditingQuestionId(null);
   };
 
   return (
     <div className="bg-[#09090b] text-zinc-100 min-h-screen flex flex-col relative text-xs font-sans h-full overflow-hidden select-none">
       
-      {/* HEADER BAR */}
+      {/* COMPACT CLEAN HEADER */}
       <header className="p-3 border-b border-[#27272a] bg-[#121214] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-[#a3e635] animate-ping" />
-          <span className="font-extrabold uppercase tracking-tight text-white">PowerPoint Polling</span>
-        </div>
-        <div className="text-[9px] font-mono font-bold bg-[#121214] border border-[#27272a] px-2 py-0.5 rounded text-zinc-400">
-          {officeStatus}
-        </div>
+        <span className="font-extrabold uppercase tracking-tight text-white text-xs">Votação PowerPoint</span>
+        {activeSession && (
+          <button
+            onClick={() => onSelectSession('')}
+            className="text-[10px] text-[#a3e635] hover:underline font-bold flex items-center gap-1"
+          >
+            <ArrowLeft className="w-3 h-3" /> Alterar Aula
+          </button>
+        )}
       </header>
 
       {/* FLASH SUCCESS DIALOG */}
@@ -505,490 +307,281 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
         </div>
       )}
 
-      {/* CORE FRAME LAYOUT */}
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
-        
-        {/* LIST ACTIVE SESSIONS */}
         {!activeSession ? (
-          <div className="space-y-3.5">
-            {isAddingSession ? (
-              <form onSubmit={handleCreateSessionInline} className="p-4 bg-[#121214] rounded-2xl border border-[#27272a] space-y-3">
-                <h4 className="font-bold text-white text-xs uppercase tracking-wider font-mono">Nova Sessão de Aula</h4>
-                <div>
-                  <label className="block text-[10px] text-zinc-550 font-mono mb-1">NOME DA SESSÃO / AULA</label>
-                  <input
-                    type="text"
-                    required
-                    value={newSessionName}
-                    onChange={(e) => setNewSessionName(e.target.value)}
-                    placeholder="Aula Teórica de Hoje"
-                    className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2.5 focus:border-[#a3e635] focus:outline-none"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="addin-cb-quiz"
-                    checked={isQuizMode}
-                    onChange={(e) => setIsQuizMode(e.target.checked)}
-                    className="accent-[#a3e635]"
-                  />
-                  <label htmlFor="addin-cb-quiz" className="text-[11px] text-zinc-400 cursor-pointer">Ativar Modo Quiz Competitivo (concede XP)</label>
-                </div>
-                <div className="flex items-center gap-2 pt-2 justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingSession(false)}
-                    className="py-1.5 px-3 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-400"
-                  >
-                    Voltar
-                  </button>
-                  <button
-                    type="submit"
-                    className="py-1.5 px-3 rounded bg-[#a3e635] text-zinc-950 font-black flex items-center gap-1"
-                  >
-                    <FolderPlus className="w-3.5 h-3.5" />
-                    <span>CRIAR</span>
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[10px] tracking-wider text-zinc-500 uppercase">Escolha a Sessão Ativa:</span>
-                  <button
-                    onClick={() => setIsAddingSession(true)}
-                    className="bg-[#a3e635] text-zinc-950 font-black py-1 px-2.5 rounded-lg text-[10px] flex items-center gap-1 uppercase"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Nova Sessão</span>
-                  </button>
-                </div>
-
-                {sessions.length === 0 ? (
-                  <div className="text-center py-10 bg-[#121214]/50 border border-dashed border-[#27272a] rounded-2xl p-4">
-                    <Layers className="w-8 h-8 text-zinc-700 mx-auto opacity-40 mb-2" />
-                    <h3 className="font-semibold text-zinc-350">Nenhuma aula criada</h3>
-                    <p className="text-[10px] text-zinc-500 mt-1">Clique no botão acima para abrir uma nova aula de enquetes.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {sessions.map((sess) => (
-                      <div
-                        key={sess.id}
-                        onClick={() => onSelectSession(sess.id)}
-                        className="p-3 bg-[#121214] border border-[#27272a] hover:border-zinc-700 rounded-xl transition-all cursor-pointer flex items-center justify-between"
-                      >
-                        <div>
-                          <h4 className="font-bold text-white text-xs">{sess.name}</h4>
-                          <span className="text-[10px] text-zinc-500 font-mono">ID: {sess.id} • {sess.questions.length} perguntas</span>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-[#a3e635]" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        ) : (
           
-          /* SECTION: INSIDE AN ACTIVE SESSION */
+          /* VIEW 1: CREAR / SELECIONAR QUESTIONÁRIO */
           <div className="space-y-4">
-            
-            {/* SESSION INFO BREADCRUMB */}
-            <div className="p-3 bg-[#121214]/90 border border-[#27272a] rounded-2xl flex items-center justify-between">
-              <div>
-                <span className="text-[9px] font-mono uppercase text-[#a3e635] font-black">SESSÃO SELECIONADA:</span>
-                <h4 className="font-extrabold text-white text-xs">{activeSession.name}</h4>
+            <form onSubmit={handleCreateSessionSubmit} className="p-3 bg-[#121214] rounded-xl border border-[#27272a] space-y-3">
+              <h3 className="font-bold text-white text-xs uppercase tracking-wider font-mono">Criar Questionário</h3>
+              
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  required
+                  value={newSessionName}
+                  onChange={(e) => setNewSessionName(e.target.value)}
+                  placeholder="Nome da aula / palestra..."
+                  className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2.5 focus:border-[#a3e635] focus:outline-none text-zinc-200"
+                />
               </div>
-              <button
-                onClick={() => {
-                  onSelectSession('');
-                  setIsAddingQuestion(false);
-                }}
-                className="text-[10px] text-zinc-400 hover:text-white bg-zinc-800 hover:bg-zinc-750 p-1.5 px-2.5 rounded-lg font-mono font-bold"
-              >
-                Voltar
-              </button>
-            </div>
 
-            {/* INTEGRATED OFFICE DESIGN PREVIEW (SIMULATOR FOR CHATS) */}
-            {!isOfficeAvailable && (
-              <div className="p-2.5 bg-[#121214] border border-orange-500/10 rounded-2xl space-y-2">
-                <div className="flex items-center gap-1.5 text-[10px] font-mono text-orange-400">
-                  <Laptop className="w-3.5 h-3.5" />
-                  <span>SIMULADOR DE APRESENTAÇÃO POWERPOINT:</span>
-                </div>
-                <p className="text-[10px] text-zinc-400 leading-relaxed">
-                  Para testar a sincronização automática no celular de teste do preview, use esta barra de slides do PowerPoint como se estivesse apresentando:
-                </p>
-                <div className="flex gap-1.5 overflow-x-auto pb-1.5 select-none scrollbar-thin">
-                  {simulatedSlides.map((slide) => (
-                    <button
-                      key={slide.id}
-                      onClick={() => handleSimulateSlideClick(slide.id)}
-                      className={`text-[9px] font-bold p-1 px-2.5 shrink-0 rounded transition-colors cursor-pointer ${
-                        slide.active
-                          ? 'bg-[#a3e635] text-zinc-950 font-black shadow'
-                          : 'bg-zinc-900 text-zinc-450 border border-zinc-800'
-                      }`}
+              <button
+                type="submit"
+                className="w-full bg-[#a3e635] hover:bg-[#a3e635]/90 text-zinc-950 font-black py-2 rounded-lg flex items-center justify-center gap-1.5 uppercase transition-all text-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>CRIAR QUESTIONÁRIO</span>
+              </button>
+            </form>
+
+            {/* SELECTION LIST */}
+            {sessions.length > 0 && (
+              <div className="space-y-2">
+                <span className="font-mono text-[9px] tracking-wider text-zinc-500 uppercase">Selecionar Aula Existente:</span>
+                <div className="space-y-1.5">
+                  {sessions.map((sess) => (
+                    <div
+                      key={sess.id}
+                      onClick={() => onSelectSession(sess.id)}
+                      className="p-2.5 bg-[#121214] border border-[#27272a] hover:border-zinc-700 rounded-lg transition-all cursor-pointer flex items-center justify-between"
                     >
-                      {slide.label}
-                    </button>
+                      <div className="truncate pr-2">
+                        <h4 className="font-bold text-white text-xs truncate">{sess.name}</h4>
+                        <span className="text-[10px] text-zinc-500 font-mono">ID: {sess.id} • {sess.questions.length} perguntas</span>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-[#a3e635]" />
+                    </div>
                   ))}
                 </div>
               </div>
             )}
-
-            {/* COMPACT BUTTON FOR MAIN CORE QR CODE SLIDE ACTION */}
-            <div className="p-3 bg-[#121214] border border-[#27272a] rounded-2xl space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-[#a3e635] font-mono font-bold tracking-wider">PASSO 1: CONFIGURAR ACESSO</span>
-                <span className="text-[9px] text-zinc-500 font-mono">ID: {activeSession.id}</span>
+          </div>
+          
+        ) : (
+          
+          /* VIEW 2: CONFIGURE ACTIVE QUESTIONNAIRE & QUESTIONS */
+          <div className="space-y-4">
+            <div className="p-3 bg-[#121214] border border-[#27272a] rounded-xl flex items-center justify-between">
+              <div className="truncate pr-2">
+                <span className="text-[9px] font-mono text-[#a3e635] uppercase font-bold">Questionário Ativo</span>
+                <h4 className="font-extrabold text-white text-xs truncate">{activeSession.name}</h4>
               </div>
+              <span className="text-[10.5px] font-bold bg-[#09090b] border border-zinc-800 p-1 px-2.5 rounded font-mono text-zinc-400">
+                Código: {activeSession.id}
+              </span>
+            </div>
+
+            {/* ADD QR CODE BUTTON */}
+            <div className="p-3 bg-[#121214] border border-[#27272a] rounded-xl space-y-2">
               <button
                 onClick={handleInsertQRCodeImage}
-                className="w-full bg-[#1e1e24] hover:bg-zinc-800 text-zinc-150 p-3 rounded-xl border border-zinc-800 hover:border-zinc-700 font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm text-xs"
+                className="w-full bg-[#1e1e24] hover:bg-zinc-800 text-zinc-150 p-2.5 rounded-lg border border-zinc-800 hover:border-zinc-700 font-bold flex items-center justify-center gap-2 transition-all cursor-pointer text-xs justify-items-center"
               >
                 <QrCode className="w-4 h-4 text-[#a3e635] animate-pulse shrink-0" />
-                <span className="font-mono uppercase tracking-wide">Inserir QR Code de Votação</span>
+                <span className="font-mono uppercase tracking-wide">Adicionar QR Code ao Slide Atual</span>
               </button>
             </div>
 
-            {/* FORM OR LIST SELECTOR */}
-            {isAddingQuestion ? (
-              
-              /* RENDER QUESTION EDITOR */
-              <form onSubmit={handleSaveQuestionSubmit} className="p-4 bg-[#121214] border border-zinc-800 rounded-2xl space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-zinc-850">
-                  <h4 className="font-bold text-white text-xs uppercase tracking-wider font-mono">
-                    {editingQuestionId ? 'Editar Pergunta' : 'Nova Pergunta'}
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingQuestion(false)}
-                    className="text-[10px] text-zinc-450 hover:text-zinc-200"
-                  >
-                    Voltar
-                  </button>
-                </div>
-
-                {/* TEXT CONTAINER */}
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-mono text-zinc-400">ENUNCIADO DA QUESTÃO / ENQUETE</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={qText}
-                    onChange={(e) => setQText(e.target.value)}
-                    placeholder="Ex: Qual dessas opções é correta sobre..."
-                    className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-xl p-2.5 text-zinc-100 placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]"
-                  />
-                </div>
-
-                {/* TYPE SELECTOR */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] font-mono text-zinc-400 mb-1">TIPO DE PERGUNTA</label>
-                    <select
-                      value={qType}
-                      onChange={(e) => setQType(e.target.value as 'alternativa' | 'aberta')}
-                      className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2 focus:outline-none focus:border-[#a3e635]"
-                    >
-                      <option value="alternativa">Múltipla Escolha (Alternativas)</option>
-                      <option value="aberta">Aberta (Resposta de Texto)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-mono text-zinc-400 mb-1">VISUALIZAÇÃO DE RESULTADOS</label>
-                    <select
-                      value={qResultsView}
-                      onChange={(e) => setQResultsView(e.target.value as 'live' | 'results-slide-only')}
-                      className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2 focus:outline-none focus:border-[#a3e635]"
-                    >
-                      <option value="results-slide-only">Mostrar somente no Slide de Resposta</option>
-                      <option value="live">Mostrar respostas ao vivo</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* ALTERNATIVES EDITOR */}
-                {qType === 'alternativa' && (
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-mono text-zinc-400">ALTERNATIVAS E MARCAÇÃO DE CERTA (GABARITO)</label>
-                    <div className="space-y-1.5">
-                      {qOptions.map((opt, idx) => {
-                        const letChar = String.fromCharCode(65 + idx);
-                        const isCorrect = qCorrectIdx === idx;
-                        return (
-                          <div key={idx} className="flex items-center gap-2">
-                            {/* Quiz correctness toggle button */}
-                            <button
-                              type="button"
-                              onClick={() => setQCorrectIdx(isCorrect ? null : idx)}
-                              className={`w-6 h-6 rounded flex items-center justify-center font-mono text-[10px] font-bold border transition-colors ${
-                                isCorrect
-                                  ? 'bg-[#a3e635] text-zinc-950 border-[#a3e635]'
-                                  : 'bg-[#09090b] text-zinc-550 border-zinc-800 hover:border-zinc-700'
-                              }`}
-                              title={isCorrect ? 'Resposta Certa' : 'Marcar como certa'}
-                            >
-                              {letChar}
-                            </button>
-                            <input
-                              type="text"
-                              value={opt}
-                              onChange={(e) => {
-                                const copy = [...qOptions];
-                                copy[idx] = e.target.value;
-                                setQOptions(copy);
-                              }}
-                              placeholder={`Alternativa ${letChar}...`}
-                              className="flex-1 text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-1.5 text-zinc-250 placeholder-zinc-700"
-                            />
-                            {qOptions.length > 2 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (qOptions.length <= 2) return;
-                                  const copy = [...qOptions];
-                                  copy.splice(idx, 1);
-                                  setQOptions(copy);
-                                  if (qCorrectIdx === idx) {
-                                    setQCorrectIdx(null);
-                                  } else if (qCorrectIdx !== null && qCorrectIdx > idx) {
-                                    setQCorrectIdx(qCorrectIdx - 1);
-                                  }
-                                }}
-                                className="text-zinc-600 hover:text-red-400 p-1"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    
-                    {qOptions.length < 8 && (
-                      <button
-                        type="button"
-                        onClick={() => setQOptions([...qOptions, ''])}
-                        className="text-[10px] font-bold text-orange-400 hover:text-orange-300 flex items-center gap-1 mt-1 bg-zinc-900 border border-zinc-850 px-2 py-1 rounded"
-                      >
-                        + Adicionar Opção
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-2 pt-2 border-t border-zinc-850">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingQuestion(false)}
-                    className="py-2 px-3 hover:bg-zinc-800 rounded-lg text-zinc-400 font-bold"
-                  >
+            {/* QUESTION CREATION / EDITING CARD */}
+            <form onSubmit={handleSaveQuestionSubmit} className="p-3.5 bg-[#121214] border border-zinc-800 rounded-xl space-y-3">
+              <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800">
+                <h4 className="font-bold text-white text-xs uppercase tracking-wider font-mono">
+                  {editingQuestionId ? 'Editar Pergunta' : 'Adicionar Pergunta'}
+                </h4>
+                {editingQuestionId && (
+                  <button type="button" onClick={handleClearForm} className="text-[10px] text-zinc-500 hover:text-zinc-300">
                     Cancelar
                   </button>
+                )}
+              </div>
+
+              {/* SELECT QUESTION TYPE */}
+              <div>
+                <label className="block text-[10px] font-mono text-zinc-500 mb-1">TIPO DE PERGUNTA</label>
+                <div className="grid grid-cols-2 gap-2">
                   <button
-                    type="submit"
-                    className="py-2 px-4 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-lg shadow cursor-pointer"
+                    type="button"
+                    onClick={() => setQType('alternativa')}
+                    className={`py-2 px-3 rounded-lg border text-[10.5px] font-bold uppercase transition-all cursor-pointer ${
+                      qType === 'alternativa'
+                        ? 'bg-[#a3e635] border-[#a3e635] text-zinc-950 font-black'
+                        : 'bg-[#09090b] border-zinc-800 text-zinc-455 hover:border-zinc-750 text-zinc-400'
+                    }`}
                   >
-                    Salvar Pergunta
+                    Múltipla Escolha
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQType('aberta');
+                      setQCorrectIdx(null);
+                    }}
+                    className={`py-2 px-3 rounded-lg border text-[10.5px] font-bold uppercase transition-all cursor-pointer ${
+                      qType === 'aberta'
+                        ? 'bg-[#a3e635] border-[#a3e635] text-zinc-950 font-black'
+                        : 'bg-[#09090b] border-zinc-800 text-zinc-455 hover:border-zinc-750 text-zinc-400'
+                    }`}
+                  >
+                    Pergunta Aberta
                   </button>
                 </div>
-              </form>
-            ) : (
-              
-              /* RENDER LIST OF CREATED QUESTIONS & PRESENTATION NAVIGATION CAROUSEL */
-              <div className="space-y-4">
-                
-                {/* LIST HEADER WITH CREATION TRIGGER */}
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[9px] tracking-wider text-zinc-500 uppercase">Perguntas da Aula ({activeSession.questions.length}):</span>
-                  <button
-                    onClick={handleOpenNewQuestion}
-                    className="bg-[#a3e635]/10 border border-[#a3e635]/35 hover:bg-[#a3e635]/15 text-[#a3e635] text-[10px] font-black p-1 px-2.5 rounded-lg flex items-center gap-1 uppercase tracking-wide"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Adicionar Questão</span>
-                  </button>
-                </div>
+              </div>
 
-                {/* CAROUSEL CARDS VIEW */}
-                {activeSession.questions.length === 0 ? (
-                  <div className="text-center p-8 bg-[#121214]/40 border border-[#27272a] rounded-2xl text-zinc-500">
-                    Nenhuma pergunta criada nesta aula. Crie uma acima para começar a preencher!
-                  </div>
-                ) : (
-                  <div className="space-y-3.5">
-                    
-                    {/* ACTIVE QUESTION SLIDES PANEL */}
-                    <div className="p-3.5 bg-[#121214] border border-[#27272a] rounded-2xl relative shadow">
-                      
-                      {/* Active carousel indicator badge */}
-                      <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80 mb-2 font-mono text-[10px] text-zinc-500">
-                        <span className="bg-[#a3e635]/10 text-[#a3e635] px-2 py-0.5 rounded border border-[#a3e635]/20 font-bold uppercase tracking-wider">
-                          Pergunta ativa: Slide {activeSession.currentQuestionIndex + 1}
-                        </span>
-                        <span>{activeSession.questions[activeSession.currentQuestionIndex]?.type === 'aberta' ? '💬 Aberta' : '❓ Alternativas'}</span>
-                      </div>
+              {/* QUESTION TEXT CHIP */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-mono text-zinc-500">ENUNCIADO</label>
+                <textarea
+                  required
+                  rows={2}
+                  value={qText}
+                  onChange={(e) => setQText(e.target.value)}
+                  placeholder="Escreva sua pergunta aqui..."
+                  className="w-full text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-2 text-zinc-100 placeholder-zinc-700 focus:outline-[#a3e635] focus:outline-none"
+                />
+              </div>
 
-                      {/* Title block */}
-                      <p className="font-bold text-white text-[12px] leading-relaxed">
-                        {activeSession.questions[activeSession.currentQuestionIndex]?.text}
-                      </p>
-
-                      {/* Live Vote scale inside this slide card component */}
-                      <div className="mt-3.5 p-2 bg-[#09090b]/40 rounded-xl border border-zinc-900 flex items-center justify-between font-mono text-[10px] text-zinc-500">
-                        <span>Respostas recebidas:</span>
-                        <span className="font-black text-[#a3e635]">
-                          {syncStore.getVotesForQuestion(activeSession.id, activeSession.questions[activeSession.currentQuestionIndex]?.id).length} votos
-                        </span>
-                      </div>
-
-                      {/* In slides insertion buttons! */}
-                      <div className="space-y-2 pt-3 border-t border-zinc-850 mt-3.5">
-                        <span className="text-[9px] text-zinc-500 font-mono tracking-wider block uppercase">PASSO 2: INSERIR NO SLIDE ATUAL DE SUA APRESENTAÇÃO</span>
-                        <div className="grid grid-cols-2 gap-2">
+              {/* OPTIONS CHIPS IF ALTERNATIVE */}
+              {qType === 'alternativa' && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-mono text-zinc-500">ALTERNATIVAS E MARCAÇÃO DE CERTA (GABARITO)</label>
+                  <div className="space-y-1.5">
+                    {qOptions.map((opt, idx) => {
+                      const letChar = String.fromCharCode(65 + idx);
+                      const isCorrect = qCorrectIdx === idx;
+                      return (
+                        <div key={idx} className="flex items-center gap-2">
                           <button
-                            onClick={handleInsertQuestionText}
-                            className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-zinc-200 text-center flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                            title="Insere enunciado e alternativas e vincula a este slide"
+                            type="button"
+                            onClick={() => setQCorrectIdx(isCorrect ? null : idx)}
+                            className={`w-6 h-6 rounded flex items-center justify-center font-mono text-[10px] font-bold border transition-colors cursor-pointer ${
+                              isCorrect
+                                ? 'bg-[#a3e635] text-zinc-950 border-[#a3e635]'
+                                : 'bg-[#09090b] text-zinc-550 border-zinc-800 hover:border-zinc-700'
+                            }`}
+                            title={isCorrect ? 'Resposta Certa' : 'Marcar resposta certa'}
                           >
-                            <FileText className="w-4 h-4 text-[#a3e635]" />
-                            <span className="font-mono text-[9px] uppercase font-bold tracking-tight">1. Slide Pergunta</span>
+                            {letChar}
+                          </button>
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => {
+                              const copy = [...qOptions];
+                              copy[idx] = e.target.value;
+                              setQOptions(copy);
+                            }}
+                            placeholder={`Alternativa ${letChar}...`}
+                            className="flex-1 text-xs bg-[#09090b] border border-zinc-800 rounded-lg p-1.5 text-zinc-200 placeholder-zinc-700 focus:outline-none focus:border-[#a3e635]"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full bg-[#a3e635] hover:bg-[#a3e635]/95 text-zinc-950 py-2 rounded-lg font-black uppercase text-xs transition-colors cursor-pointer"
+              >
+                {editingQuestionId ? 'Salvar Pergunta' : 'Adicionar Pergunta'}
+              </button>
+            </form>
+
+            {/* LIST OF QUESTIONS */}
+            {activeSession.questions.length > 0 && (
+              <div className="space-y-2.5">
+                <span className="font-mono text-[9px] tracking-wider text-zinc-500 uppercase">Perguntas criadas ({activeSession.questions.length}):</span>
+                <div className="space-y-2">
+                  {activeSession.questions.map((q, idx) => {
+                    const isCurrentActive = activeSession.currentQuestionIndex === idx;
+                    return (
+                      <div
+                        key={q.id}
+                        className={`p-3 rounded-xl border transition-all space-y-2.5 cursor-pointer ${
+                          isCurrentActive
+                            ? 'bg-zinc-900/60 border-zinc-700 text-white'
+                            : 'bg-[#121214] border-zinc-900 text-zinc-400 hover:bg-zinc-900/20'
+                        }`}
+                        onClick={() => {
+                          if (activeSession.currentQuestionIndex !== idx) {
+                            syncStore.setQuestionIndex(activeSession.id, idx);
+                            onRefresh();
+                          }
+                        }}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-[#a3e635]">
+                              {idx + 1}
+                            </span>
+                            <span className="text-[10px] font-mono text-zinc-500">
+                              {q.type === 'aberta' ? '💬 Aberta' : '❓ Alternativa'}
+                            </span>
+                            <span className="text-xs font-bold truncate block text-zinc-100">{q.text}</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-1 md:gap-2 shrink-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartEdit(q);
+                              }}
+                              className="p-1 text-zinc-400 hover:text-white"
+                              title="Editar enunciado"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteQuestion(q.id);
+                              }}
+                              className="p-1 text-zinc-550 hover:text-red-400"
+                              title="Remover pergunta"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* SLIDES VINCULATION TRIGGERS */}
+                        <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-zinc-800">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleInsertQuestionText(q);
+                            }}
+                            className="bg-[#09090b] hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 p-1.5 rounded text-[10px] font-mono font-bold text-zinc-300 flex items-center justify-center gap-1 transition-all"
+                          >
+                            <FileText className="w-3 h-3 text-[#a3e635]" />
+                            <span>Slide Pergunta</span>
                           </button>
                           <button
-                            onClick={handleInsertResponsesSlide}
-                            className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-850 text-zinc-200 text-center flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                            title="Insere layout de gráfico e vincula o próximo slide para abrir respostas ao vivo"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleInsertResponsesSlide(q);
+                            }}
+                            className="bg-[#09090b] hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 p-1.5 rounded text-[10px] font-mono font-bold text-zinc-300 flex items-center justify-center gap-1 transition-all"
                           >
-                            <Layers className="w-4 h-4 text-emerald-400" />
-                            <span className="font-mono text-[9px] uppercase font-bold tracking-tight">2. Slide Resposta</span>
+                            <Layers className="w-3 h-3 text-emerald-400" />
+                            <span>Slide Respostas</span>
                           </button>
                         </div>
                       </div>
-
-                      {/* Carousel Arrow Controllers */}
-                      <div className="flex items-center gap-2 mt-4">
-                        <button
-                          onClick={handlePrevQuestion}
-                          disabled={activeSession.currentQuestionIndex === 0}
-                          className="flex-1 py-1.5 bg-[#1e1e24] border border-zinc-850 text-zinc-300 disabled:opacity-30 rounded hover:bg-zinc-800 transition-colors text-[10px] font-bold uppercase flex items-center justify-center gap-1"
-                        >
-                          <ChevronLeft className="w-4 text-zinc-500" />
-                          Anterior
-                        </button>
-                        <button
-                          onClick={handleNextQuestion}
-                          disabled={activeSession.currentQuestionIndex === activeSession.questions.length - 1}
-                          className="flex-1 py-1.5 bg-[#1e1e24] border border-zinc-850 text-zinc-300 disabled:opacity-30 rounded hover:bg-zinc-800 transition-colors text-[10px] font-bold uppercase flex items-center justify-center gap-1"
-                        >
-                          Próxima
-                          <ChevronRight className="w-4 text-zinc-500" />
-                        </button>
-                      </div>
-
-                      {/* Live state results override toggle switch */}
-                      <div className="flex items-center justify-between pt-3 border-t border-zinc-850 mt-3 font-mono text-[10px]">
-                        <span className="text-zinc-500">Exibir Gráfico Agora:</span>
-                        <button
-                          onClick={() => {
-                            syncStore.toggleResults(activeSession.id, !activeSession.showResults);
-                            onRefresh();
-                          }}
-                          className={`p-1 px-2.5 rounded text-[9px] font-bold flex items-center gap-1 ${
-                            activeSession.showResults ? 'bg-indigo-950/40 border border-indigo-500/35 text-indigo-400' : 'bg-zinc-900 text-zinc-550'
-                          }`}
-                        >
-                          {activeSession.showResults ? (
-                            <>
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>ATIVO</span>
-                            </>
-                          ) : (
-                            <>
-                              <EyeOff className="w-3.5 h-3.5" />
-                              <span>OCULTO</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* INDEX LIST OF MINIFIED QUESTION METADATA CELLS */}
-                    <div className="space-y-2 pt-2">
-                      <span className="text-[10px] text-zinc-500 font-mono tracking-wider block uppercase">ORGANIZAÇÃO E GESTÃO:</span>
-                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                        {activeSession.questions.map((q, idx) => {
-                          const isActiveQ = activeSession.currentQuestionIndex === idx;
-                          // Check active mappings
-                          const qMappings = (activeSession.slideMappings || []).filter(m => m.questionId === q.id);
-
-                          return (
-                            <div
-                              key={q.id}
-                              className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
-                                isActiveQ
-                                  ? 'bg-zinc-900 border-zinc-700 text-white font-semibold'
-                                  : 'bg-[#121214] border-zinc-900 text-zinc-400 hover:bg-zinc-900/40'
-                              }`}
-                            >
-                              <div className="truncate pr-1.5 flex items-center gap-2">
-                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isActiveQ ? 'bg-[#a3e635] text-zinc-950' : 'bg-zinc-800 text-zinc-400'}`}>
-                                  P{idx + 1}
-                                </span>
-                                <div className="truncate text-left leading-none">
-                                  <span className="text-[11px] truncate block">{q.text}</span>
-                                  {qMappings.length > 0 && (
-                                    <span className="text-[9px] text-[#a3e635] font-mono leading-none block mt-0.5">
-                                      🔗 {qMappings.length === 2 ? 'Pergunta e Gráfico Mapeados' : '1 Slide Mapeado'}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenEditQuestion(q);
-                                  }}
-                                  className="p-1 hover:bg-zinc-800 rounded text-zinc-450 hover:text-white"
-                                  title="Editar"
-                                >
-                                  <Edit2 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteQuestion(q.id);
-                                  }}
-                                  className="p-1 hover:bg-zinc-800 hover:text-red-400 rounded text-zinc-550"
-                                  title="Excluir"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* FIXED FOOTER BRAND INDICATOR */}
+      {/* DISCREET NO-NOISE FOOTER */}
       <footer className="p-2 border-t border-[#27272a] bg-[#121214]/60 text-center text-[9px] text-zinc-650 font-mono tracking-wider uppercase font-medium">
-        <span>Microsoft PowerPoint Companion V2</span>
+        <span>Microsoft PowerPoint Polling Companion</span>
       </footer>
     </div>
   );
