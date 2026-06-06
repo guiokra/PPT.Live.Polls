@@ -61,9 +61,14 @@ export const TelaParticipante: React.FC<TelaParticipanteProps> = ({
         // Attempt restoring participant from local storage matching this session
         const storedMe = localStorage.getItem(`ppt_myself_${initialSessionId}`);
         if (storedMe) {
-          const parsed = JSON.parse(storedMe);
-          setMe(parsed);
-          setStage('voting_panel');
+          try {
+            const parsed = JSON.parse(storedMe);
+            setMe(parsed);
+            setStage('voting_panel');
+          } catch (e) {
+            console.error('Error parsing stored student data:', e);
+            localStorage.removeItem(`ppt_myself_${initialSessionId}`);
+          }
         }
       }
     }

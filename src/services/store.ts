@@ -78,9 +78,16 @@ const DEFAULT_QUESTION_BANK: QuestionBankItem[] = [
 
 // Seed initial default questions if question bank is empty
 function seedQuestionBankIfNeeded(): void {
-  const existing = localStorage.getItem(QUESTION_BANK_KEY);
-  if (!existing || JSON.parse(existing).length === 0) {
-    localStorage.setItem(QUESTION_BANK_KEY, JSON.stringify(DEFAULT_QUESTION_BANK));
+  try {
+    const existing = localStorage.getItem(QUESTION_BANK_KEY);
+    if (!existing || JSON.parse(existing).length === 0) {
+      localStorage.setItem(QUESTION_BANK_KEY, JSON.stringify(DEFAULT_QUESTION_BANK));
+    }
+  } catch (e) {
+    console.warn('Error reading or parsing question bank from storage, seeding defaults:', e);
+    try {
+      localStorage.setItem(QUESTION_BANK_KEY, JSON.stringify(DEFAULT_QUESTION_BANK));
+    } catch (_) {}
   }
 }
 
@@ -207,8 +214,15 @@ export const syncStore = {
 
   // SESSIONS
   getSessions(): Session[] {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    try {
+      const raw = localStorage.getItem(SESSIONS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error('Error parsing sessions from storage:', e);
+      return [];
+    }
   },
 
   getSession(id: string): Session | undefined {
@@ -347,8 +361,15 @@ export const syncStore = {
 
   // VOTING ENGINE
   getAllVotesRaw(): Vote[] {
-    const raw = localStorage.getItem(VOTES_KEY);
-    return raw ? JSON.parse(raw) : [];
+    try {
+      const raw = localStorage.getItem(VOTES_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error('Error parsing votes from storage:', e);
+      return [];
+    }
   },
 
   getVotesForSession(sessionId: string): Vote[] {
@@ -401,8 +422,15 @@ export const syncStore = {
 
   // PARTICIPANTS
   getParticipantsRaw(): Participant[] {
-    const raw = localStorage.getItem(PARTICIPANTS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    try {
+      const raw = localStorage.getItem(PARTICIPANTS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error('Error parsing participants from storage:', e);
+      return [];
+    }
   },
 
   getParticipantsForSession(sessionId: string): Participant[] {
@@ -459,8 +487,15 @@ export const syncStore = {
 
   // QUESTION BANK SERVICES
   getQuestionBank(): QuestionBankItem[] {
-    const raw = localStorage.getItem(QUESTION_BANK_KEY);
-    return raw ? JSON.parse(raw) : [];
+    try {
+      const raw = localStorage.getItem(QUESTION_BANK_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error('Error parsing question bank from storage:', e);
+      return [];
+    }
   },
 
   addQuestionToBank(text: string, options: string[], correctOptionIndex: number | null, category?: string): QuestionBankItem {

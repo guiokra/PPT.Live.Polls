@@ -27,6 +27,25 @@ import QRCode from 'qrcode';
 
 declare const Office: any;
 
+// Safe access helpers for Office object properties to prevent crashes on standalone browser tests
+const getOfficeEventType = () => {
+  return (typeof Office !== 'undefined' && Office && Office.EventType) 
+    ? Office.EventType 
+    : { DocumentSelectionChanged: 'documentSelectionChanged' };
+};
+
+const getOfficeCoercionType = () => {
+  return (typeof Office !== 'undefined' && Office && Office.CoercionType) 
+    ? Office.CoercionType 
+    : { SlideRange: 'slideRange', Text: 'text', Image: 'image' };
+};
+
+const getOfficeAsyncResultStatus = () => {
+  return (typeof Office !== 'undefined' && Office && Office.AsyncResultStatus) 
+    ? Office.AsyncResultStatus 
+    : { Succeeded: 'succeeded', Failed: 'failed' };
+};
+
 interface PowerPointAddinTaskPaneProps {
   onSelectSession: (id: string) => void;
   onOpenCreateSession: () => void;
@@ -62,16 +81,111 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
   // Dropdown menus for questions
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
+  const handleSelectionChanged = () => {
+    if (!activeSession || typeof Office === 'undefined' || !Office.context || !Office.context.document) return;
+    try {
+      const coercionType = getOfficeCoercionType();
+      const asyncResultStatus = getOfficeAsyncResultStatus();
+      Office.context.document.getSelectedDataAsync(
+        coercionType.SlideRange,
+        (result: any) => {
+          if (result && result.status === asyncResultStatus.Succeeded && result.value && result.value.slides && result.value.slides.length > 0) {
+            const slideId = result.value.slides[0].id;
+            const mappings = activeSession.slideMappings || [];
+            const found = mappings.find(m => m.slideId === slideId);
+            if (found) {
+              const questionIdx = activeSession.questions.findIndex(q => q.id === found.questionId);
+              if (questionIdx >= 0) {
+                syncStore.setQuestionIndex(activeSession.id, questionIdx);
+                if (found.slideType === 'responses') {
+                  syncStore.toggleResults(activeSession.id, true);
+                } else {
+                  syncStore.toggleResults(activeSession.id, false);
+                }
+                onRefresh();
+              }
+            }
+          }
+        }
+      );
+    } catch (e) {
+      console.warn('Silent fallback slide navigation tracking:', e);
+    }
+  };
+
   useEffect(() => {
     setSessions(syncStore.getSessions().filter(s => s.status === 'active'));
 
-    if (typeof Office !== 'undefined') {
-      Office.onReady((info: any) => {
-        if (info.host === Office.HostType.PowerPoint) {
+    let isMounted = true;
+
+    const initOffice = () => {
+      if (typeof Office !== 'undefined') {
+        if (Office.context && Office.context.document) {
           setIsOfficeAvailable(true);
         }
-      });
+        Office.onReady((info: any) => {
+          if (!isMounted) return;
+          const hostType = (info && info.host) || '';
+          if (hostType === 'PowerPoint' || (Office.HostType && hostType === Office.HostType.PowerPoint) || Office.context) {
+            setIsOfficeAvailable(true);
+            try {
+              // Register slide change detection inside PowerPoint
+              const eventType = getOfficeEventType();
+              Office.context.document.addHandlerAsync(
+                eventType.DocumentSelectionChanged,
+                handleSelectionChanged,
+                () => {}
+              );
+            } catch (_) {}
+          }
+        });
+      }
+    };
+
+    // Safely inject Office.js dynamically only inside this taskpane component
+    if (typeof Office === 'undefined') {
+      const scriptId = 'office-js-script';
+      let script = document.getElementById(scriptId) as HTMLScriptElement;
+      if (!script) {
+        script = document.createElement('script');
+        script.id = scriptId;
+        script.src = 'https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js';
+        script.async = true;
+        script.onload = () => {
+          if (isMounted) initOffice();
+        };
+        script.onerror = () => {
+          console.warn('Office.js could not be loaded or was blocked by headers.');
+        };
+        document.head.appendChild(script);
+      } else {
+        // Listen to load event if script already exists but is loading
+        const handleScriptLoad = () => {
+          if (isMounted) initOffice();
+        };
+        script.addEventListener('load', handleScriptLoad);
+        return () => {
+          isMounted = false;
+          script.removeEventListener('load', handleScriptLoad);
+        };
+      }
+    } else {
+      initOffice();
     }
+
+    return () => {
+      isMounted = false;
+      if (typeof Office !== 'undefined' && Office.context && Office.context.document) {
+        try {
+          const eventType = getOfficeEventType();
+          Office.context.document.removeHandlerAsync(
+            eventType.DocumentSelectionChanged,
+            handleSelectionChanged,
+            () => {}
+          );
+        } catch (_) {}
+      }
+    };
   }, [activeSession]);
 
   const triggerNotification = (message: string) => {
@@ -96,6 +210,7 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
   const handleInsertQRCodeImage = async () => {
     if (!activeSession) return;
     const joinUrl = `${appUrl}?role=participant&session=${activeSession.id}`;
+    const fallbackText = `📱 ACESSO RÁPIDO DO ALUNO:\n\n1. Escaneie o QR Code inicial\n2. Ou acesse: ${appUrl}\n3. Código da Sala: ${activeSession.id}`;
 
     try {
       const qrDataUrl = await QRCode.toDataURL(joinUrl, {
@@ -105,30 +220,41 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
       });
       const base64Str = qrDataUrl.split(',')[1];
 
-      if (isOfficeAvailable) {
+      // Copy accessibility instruction to clipboard automatically
+      try {
+        await navigator.clipboard.writeText(fallbackText);
+      } catch (_) {}
+
+      if (isOfficeAvailable && typeof Office !== 'undefined' && Office && Office.context && Office.context.document) {
+        const coercionType = getOfficeCoercionType();
+        const asyncResultStatus = getOfficeAsyncResultStatus();
         Office.context.document.setSelectedDataAsync(
           base64Str,
-          { coercionType: Office.CoercionType.Image },
+          { coercionType: coercionType.Image },
           (asyncResult: any) => {
-            if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-              triggerNotification('QR Code adicionado ao slide atual!');
+            if (asyncResult && asyncResult.status === asyncResultStatus.Succeeded) {
+              triggerNotification('QR Code inserido no PowerPoint! (Também copiado para o Clipboard)');
             } else {
-              triggerNotification('Para inserir, selecione um slide no PowerPoint.');
+              // Custom guide error message
+              triggerNotification('Selecione uma caixa de imagem/forma no PowerPoint ou clique no slide. Instruções de login copiadas! Use Ctrl+V para colar.');
             }
           }
         );
       } else {
         // Fallback simulate link
-        triggerNotification('QR Code inserido no slide atual da apresentação!');
+        triggerNotification('QR Code gerado! Instruções copiadas para a área de transferência. Use Ctrl+V.');
         syncStore.saveSlideMapping(activeSession.id, 'slide-instructions', 'instructions', 'question');
         onRefresh();
       }
     } catch (_) {
-      triggerNotification('Erro ao gerar imagem do QR Code.');
+      triggerNotification('Erro ao gerar imagem do QR Code. Copiado instruções de texto.');
+      try {
+        await navigator.clipboard.writeText(fallbackText);
+      } catch (_) {}
     }
   };
 
-  const handleInsertQuestionText = (q: Question) => {
+  const handleInsertQuestionText = async (q: Question) => {
     if (!activeSession) return;
 
     const optionsText = q.type === 'alternativa'
@@ -137,72 +263,88 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
 
     const slideText = `❓ PERGUNTA:\n${q.text}\n\n${optionsText}\n\n📱 Escaneie o QR Code inicial para responder!`;
 
-    if (isOfficeAvailable) {
+    try {
+      await navigator.clipboard.writeText(slideText);
+    } catch (_) {}
+
+    if (isOfficeAvailable && typeof Office !== 'undefined' && Office && Office.context && Office.context.document) {
+      const coercionType = getOfficeCoercionType();
+      const asyncResultStatus = getOfficeAsyncResultStatus();
       Office.context.document.getSelectedDataAsync(
-        Office.CoercionType.SlideRange,
+        coercionType.SlideRange,
         (result: any) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded && result.value.slides.length > 0) {
+          if (result && result.status === asyncResultStatus.Succeeded && result.value && result.value.slides && result.value.slides.length > 0) {
             const slideId = result.value.slides[0].id;
             syncStore.saveSlideMapping(activeSession.id, slideId, q.id, 'question');
             
             Office.context.document.setSelectedDataAsync(
               slideText,
-              { coercionType: Office.CoercionType.Text },
+              { coercionType: coercionType.Text },
               (asyncResult: any) => {
-                if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-                  triggerNotification('Questão adicionada ao slide e vinculada!');
+                if (asyncResult && asyncResult.status === asyncResultStatus.Succeeded) {
+                  triggerNotification('Questão adicionada ao slide! Se quiser, pule ou use Ctrl+V para duplicar.');
+                  onRefresh();
+                } else {
+                  triggerNotification('Slide vinculado com sucesso! Questão copiada para área de transferência; use Ctrl+V.');
                   onRefresh();
                 }
               }
             );
           } else {
-            triggerNotification('Selecione um slide no PowerPoint primeiro.');
+            // Even if slide metadata is not fully reachable, we map it simulated or guide them
+            triggerNotification('Selecione uma caixa de texto no slide para inserir a pergunta diretamente ou use Ctrl+V para colar!');
           }
         }
       );
     } else {
       const simulatedSlideId = `slide-q-${q.id}`;
       syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, q.id, 'question');
-      triggerNotification('Questão vinculada ao slide atual!');
-      
-      // Copy to clipboard silently
-      navigator.clipboard.writeText(slideText).catch(() => {});
+      triggerNotification('Questão vinculada ao slide! Texto copiado para área de transferência (Ctrl+V).');
       onRefresh();
     }
   };
 
-  const handleInsertResponsesSlide = (q: Question) => {
+  const handleInsertResponsesSlide = async (q: Question) => {
     if (!activeSession) return;
 
     const dummyText = `📊 EXIBIR RESULTADOS:\n${q.text}\n\n[ Os votos de todos os alunos aparecerão aqui ao vivo ]`;
 
-    if (isOfficeAvailable) {
+    try {
+      await navigator.clipboard.writeText(dummyText);
+    } catch (_) {}
+
+    if (isOfficeAvailable && typeof Office !== 'undefined' && Office && Office.context && Office.context.document) {
+      const coercionType = getOfficeCoercionType();
+      const asyncResultStatus = getOfficeAsyncResultStatus();
       Office.context.document.getSelectedDataAsync(
-        Office.CoercionType.SlideRange,
+        coercionType.SlideRange,
         (result: any) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded && result.value.slides.length > 0) {
+          if (result && result.status === asyncResultStatus.Succeeded && result.value && result.value.slides && result.value.slides.length > 0) {
             const slideId = result.value.slides[0].id;
             syncStore.saveSlideMapping(activeSession.id, slideId, q.id, 'responses');
             
             Office.context.document.setSelectedDataAsync(
               dummyText,
-              { coercionType: Office.CoercionType.Text },
+              { coercionType: coercionType.Text },
               (asyncResult: any) => {
-                if (asyncResult.status === Office.AsyncResultStatus.Succeeded) {
-                  triggerNotification('Gráfico de respostas vinculado a este slide!');
+                if (asyncResult && asyncResult.status === asyncResultStatus.Succeeded) {
+                  triggerNotification('Tela de respostas vinculada! (Também copiada ao clipboard)');
+                  onRefresh();
+                } else {
+                  triggerNotification('Slide de respostas vinculado! Texto copiado para área de transferência; use Ctrl+V.');
                   onRefresh();
                 }
               }
             );
           } else {
-            triggerNotification('Selecione um slide no PowerPoint primeiro.');
+            triggerNotification('Selecione uma caixa de texto no PowerPoint ou use Ctrl+V para colar os resultados!');
           }
         }
       );
     } else {
       const simulatedSlideId = `slide-r-${q.id}`;
       syncStore.saveSlideMapping(activeSession.id, simulatedSlideId, q.id, 'responses');
-      triggerNotification('Gráfico de respostas vinculado ao slide atual!');
+      triggerNotification('Slide de respostas mapeado! Dados copiados ao clipboard (Ctrl+V).');
       onRefresh();
     }
   };
@@ -230,41 +372,20 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
         editingQuestionId,
         qText.trim(),
         filteredOptions,
-        qType === 'alternativa' ? qCorrectIdx : null
+        qCorrectIdx,
+        qType,
+        'results-slide-only'
       );
-
-      // Force type & metadata sync
-      const allSessions = syncStore.getSessions();
-      const s = allSessions.find(sess => sess.id === activeSession.id);
-      if (s) {
-        const targetQ = s.questions.find(quest => quest.id === editingQuestionId);
-        if (targetQ) {
-          targetQ.type = qType;
-        }
-        localStorage.setItem('polling_sessions', JSON.stringify(allSessions));
-      }
       triggerNotification('Pergunta atualizada!');
     } else {
-      const currentS = syncStore.getSession(activeSession.id);
-      if (currentS) {
-        const newId = `q-${Date.now()}`;
-        const newQuestion: Question = {
-          id: newId,
-          text: qText.trim(),
-          options: filteredOptions,
-          correctOptionIndex: qType === 'alternativa' ? qCorrectIdx : null,
-          type: qType,
-          resultsView: 'results-slide-only'
-        };
-        currentS.questions.push(newQuestion);
-        
-        const allSessions = syncStore.getSessions();
-        const foundIdx = allSessions.findIndex(sess => sess.id === activeSession.id);
-        if (foundIdx >= 0) {
-          allSessions[foundIdx] = currentS;
-          localStorage.setItem('polling_sessions', JSON.stringify(allSessions));
-        }
-      }
+      syncStore.addQuestionToSession(
+        activeSession.id,
+        qText.trim(),
+        filteredOptions,
+        qType === 'alternativa' ? qCorrectIdx : null,
+        qType,
+        'results-slide-only'
+      );
       triggerNotification('Pergunta adicionada!');
     }
 
@@ -684,26 +805,51 @@ export const PowerPointAddinTaskPane: React.FC<PowerPointAddinTaskPaneProps> = (
                       </div>
 
                       {/* DOWN ROW: COMPACT SLIDES INJECT BUTTON ROW AT THE BOTTOM OF CARD */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100 bg-white">
+                      <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100 bg-white flex-wrap">
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleInsertQuestionText(q);
                           }}
-                          className="bg-white hover:bg-slate-50 border border-slate-200 p-1.5 px-3 rounded-lg text-[10px] font-bold text-slate-650 flex items-center gap-1 cursor-pointer transition"
+                          className="bg-white hover:bg-slate-50 border border-slate-200 py-1.5 px-2 rounded-lg text-[10px] font-bold text-slate-650 flex items-center gap-1 cursor-pointer transition"
+                          title="Inserir texto da pergunta no Slide"
                         >
                           <Plus className="w-3 h-3 text-[#2d7f8d]" />
-                          <span>Slide Pergunta</span>
+                          <span>Ins. Perg.</span>
                         </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             handleInsertResponsesSlide(q);
                           }}
-                          className="bg-white hover:bg-slate-50 border border-slate-200 p-1.5 px-3 rounded-lg text-[10px] font-bold text-slate-650 flex items-center gap-1 cursor-pointer transition"
+                          className="bg-white hover:bg-slate-50 border border-slate-200 py-1.5 px-2 rounded-lg text-[10px] font-bold text-slate-650 flex items-center gap-1 cursor-pointer transition"
+                          title="Inserir slide de resultado de respostas"
                         >
                           <Plus className="w-3 h-3 text-[#2d7f8d]" />
-                          <span>Slide Respostas</span>
+                          <span>Ins. Resp.</span>
+                        </button>
+
+                        {/* Direct action buttons: Edit and delete */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartEdit(q);
+                          }}
+                          className="bg-[#fffbeb] hover:bg-[#fef3c7] text-[#b45309] border border-[#fde68a] py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition"
+                          title="Editar/Modificar Pergunta"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>Editar</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteQuestion(q.id);
+                          }}
+                          className="bg-red-50 hover:bg-red-100 border border-red-200 py-1.5 px-2 rounded-lg text-[10px] text-red-600 flex items-center gap-1 cursor-pointer transition"
+                          title="Excluir Pergunta"
+                        >
+                          <Trash2 className="w-3 h-3 text-red-500" />
                         </button>
 
                         <div className="ml-auto text-[9.5px] font-mono text-slate-400">
