@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Microsoft Office Add-in Manifest for PowerPoint Live Polls & Quizzes.
+  This manifest configures a Task Pane Add-in inside PowerPoint.
+-->
+<OfficeApp 
+  xmlns="http://schemas.microsoft.com/office/appshere/1.0" 
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+  xsi:type="TaskPaneApp">
+  
+  <Id>630c4d4b-3f6b-4f67-8ce4-91eb46176246</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>PowerPoint Live Polls</ProviderName>
+  <DefaultLocale>pt-BR</DefaultLocale>
+  <DisplayName DefaultValue="PowerPoint Live Polls" />
+  <Description DefaultValue="Crie enquetes e quizzes interativos ao vivo diretamente de seus slides do PowerPoint." />
+  
+  <IconUrl DefaultValue="https://ais-pre-l6bf73nqm3k3vxinvrzbl5-449318021442.us-west2.run.app/icon.png" />
+  <HighResolutionIconUrl DefaultValue="https://ais-pre-l6bf73nqm3k3vxinvrzbl5-449318021442.us-west2.run.app/icon.png" />
+  
+  <SupportUrl DefaultValue="https://ais-pre-l6bf73nqm3k3vxinvrzbl5-449318021442.us-west2.run.app" />
+  
+  <AppDomains>
+    <AppDomain>https://ais-dev-l6bf73nqm3k3vxinvrzbl5-449318021442.us-west2.run.app</AppDomain>
+    <AppDomain>https://ais-pre-l6bf73nqm3k3vxinvrzbl5-449318021442.us-west2.run.app</AppDomain>
+  </AppDomains>
+  
+  <Hosts>
+    <Host Name="Presentation" />
+  </Hosts>
+  
+  <DefaultSettings>
+    <!-- Points directly to our TaskPane wrapper layout -->
+    <SourceLocation DefaultValue="https://ais-dev-l6bf73nqm3k3vxinvrzbl5-449318021442.us-west2.run.app?role=addin" />
+    <RequestedWidth>350</RequestedWidth>
+  </DefaultSettings>
+  
+  <Permissions>ReadWriteDocument</Permissions>
+</OfficeApp>

@@ -1,0 +1,6 @@
+{
+  "name": "PowerPoint Live Polls & Quizzes",
+  "description": "Suplemento do Microsoft PowerPoint para criar enquetes e quizzes ao vivo com QR Code e resultados em tempo real do celular.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
